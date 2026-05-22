@@ -111,6 +111,7 @@ do_install() {
         exit 1
     fi
 
+    # Note: $? here checks the last command in the elif chain (pacman/dnf/apt), which is correct
     if [ $? -eq 0 ]; then
       echo -e "  ${GREEN}✓${NC} Installed dependencies using $PM"
     else
@@ -202,12 +203,17 @@ import threading
 import grp
 import urllib.request
 import urllib.error
+import shlex
+import pwd
+import tempfile
 
 try:
     from stem.control import Controller
     import stem
+    HAS_STEM = True
 except ImportError:
-    pass
+    HAS_STEM = False
+    print("[ERROR] python-stem is not installed. Tor control features unavailable.", file=sys.stderr)
 
 # Attempt to import rich. If not installed, we will provide a beautiful fallback,
 # but we install python3-rich in our install script, so it will be available.
@@ -244,7 +250,9 @@ class AnonShield:
         self.bw_stats = {"rx": 0, "tx": 0}
         self.bw_thread = None
         self.bw_listening = False
+        self._bw_lock = threading.Lock()
         self.mac_rotator_active = False
+        self._stop_rotator = threading.Event()
         self.mac_thread = None
         self.ks_thread = None
 
@@ -301,6 +309,10 @@ class AnonShield:
             return "unknown"
 
     def spoof_macs(self):
+        if os.path.exists(STATE_FILE):
+            console_print("[yellow]⚠️ Warning: Previous MAC state file found! MACs may already be spoofed. Skipping MAC spoof to protect original hardware MACs.[/yellow]")
+            return
+            
         interfaces = self.get_interfaces()
         state = {}
         
@@ -332,9 +344,11 @@ class AnonShield:
             else:
                 console_print(f"    [yellow]⚠️ Failed to spoof MAC (driver might not support it)[/yellow]")
         
-        # Save state
-        with open(STATE_FILE, "w") as f:
+        # Save state atomically to prevent corruption on crash
+        tmp_path = STATE_FILE + ".tmp"
+        with open(tmp_path, "w") as f:
             json.dump(state, f)
+        os.replace(tmp_path, STATE_FILE)
             
         console_print("[bold cyan]  Waiting for NetworkManager to reconnect interfaces...[/bold cyan]")
         time.sleep(3)
@@ -347,15 +361,21 @@ class AnonShield:
         try:
             with open(STATE_FILE, "r") as f:
                 state = json.load(f)
-                
+
+            failed = []
             for iface, orig_mac in state.items():
                 console_print(f"  • Restoring [bold]{iface}[/bold] to {orig_mac}...", "cyan")
                 subprocess.run(["ip", "link", "set", "dev", iface, "down"], capture_output=True, check=False)
-                subprocess.run(["macchanger", "-m", orig_mac, iface], capture_output=True, check=False)
+                res = subprocess.run(["macchanger", "-m", orig_mac, iface], capture_output=True, check=False)
                 subprocess.run(["ip", "link", "set", "dev", iface, "up"], capture_output=True, check=False)
-                
-            os.remove(STATE_FILE)
-            console_print("  [green]✓ MAC addresses restored successfully.[/green]")
+                if res.returncode != 0:
+                    failed.append(iface)
+
+            if not failed:
+                os.remove(STATE_FILE)
+                console_print("  [green]✓ MAC addresses restored successfully.[/green]")
+            else:
+                console_print(f"  [yellow]⚠️ Could not restore MACs for: {', '.join(failed)}. State file kept for retry.[/yellow]")
         except Exception as e:
             console_print(f"  [red]✗ Failed to restore MAC addresses: {e}[/red]")
 
@@ -369,7 +389,7 @@ class AnonShield:
 DNS=127.0.0.1:{self.config['tor_dns_port']}
 Domains=~.
 FallbackDNS=
-DNSStubListener=yes
+DNSStubListener=no
 """
             with open(dropin_file, "w") as f:
                 f.write(config_content)
@@ -384,6 +404,8 @@ DNSStubListener=yes
         subprocess.run(["systemctl", action, "tor"], capture_output=True)
 
     def get_tor_bootstrap_status(self):
+        if not HAS_STEM:
+            return 0, "stem not installed"
         port = self.config["tor_control_port"]
         try:
             with Controller.from_port(port=port) as controller:
@@ -393,7 +415,7 @@ DNSStubListener=yes
                     progress = int(phase.split("PROGRESS=")[1].split(" ")[0])
                     summary = phase.split('SUMMARY="')[1].split('"')[0] if 'SUMMARY="' in phase else "Bootstrapping"
                     return progress, summary
-            return 0, "Initializing"
+                return 0, "Initializing"
         except Exception as e:
             return 0, f"Offline ({e})"
 
@@ -421,15 +443,34 @@ DNSStubListener=yes
             has_bypass = True
         except KeyError:
             has_bypass = False
+
+        # Resolve numeric UID/GID for nftables compatibility across kernel versions
+        try:
+            tor_uid = pwd.getpwnam(tor_user).pw_uid
+        except KeyError:
+            tor_uid = None
+        try:
+            bypass_gid = grp.getgrnam("anonshield-bypass").gr_gid if has_bypass else None
+        except KeyError:
+            bypass_gid = None
+
+        uid_match = str(tor_uid) if tor_uid is not None else f'"{tor_user}"'
+        gid_match = str(bypass_gid) if bypass_gid is not None else '"anonshield-bypass"'
             
         nft_conf = f"""
 table inet anonshield {{
+    chain prerouting_nat {{
+        type nat hook prerouting priority dstnat; policy accept;
+        iifname "veth-anon" udp dport 53 redirect to :{dns_port}
+        iifname "veth-anon" tcp dport 53 redirect to :{dns_port}
+        iifname "veth-anon" meta l4proto tcp redirect to :{trans_port}
+    }}
     chain output_nat {{
         type nat hook output priority dstnat; policy accept;
-        meta skuid "{tor_user}" return
+        meta skuid {uid_match} return
 """
         if has_bypass:
-            nft_conf += '        meta skgid "anonshield-bypass" return\n'
+            nft_conf += f'        meta skgid {gid_match} return\n'
             
         nft_conf += f"""        udp dport 53 redirect to :{dns_port}
         tcp dport 53 redirect to :{dns_port}
@@ -441,12 +482,16 @@ table inet anonshield {{
         
         nft_conf += f"""        meta l4proto tcp redirect to :{trans_port}
     }}
+    chain forward_filter {{
+        type filter hook forward priority filter; policy accept;
+        iifname "veth-anon" reject
+    }}
     chain output_filter {{
         type filter hook output priority filter; policy accept;
-        meta skuid "{tor_user}" accept
+        meta skuid {uid_match} accept
 """
         if has_bypass:
-            nft_conf += '        meta skgid "anonshield-bypass" accept\n'
+            nft_conf += f'        meta skgid {gid_match} accept\n'
             
         nft_conf += f"""        meta nfproto ipv6 reject
         oifname "lo" accept
@@ -472,43 +517,72 @@ table inet anonshield {{
         subprocess.run(["nft", "delete", "table", "inet", "anonshield"], capture_output=True)
 
     def send_notification(self, title, message):
+        # Use DBUS_SESSION_BUS_ADDRESS so notify-send works under sudo/pkexec
         user = os.environ.get("SUDO_USER")
+        env = os.environ.copy()
         if user:
-            subprocess.run(["su", "-", user, "-c", f"notify-send '{title}' '{message}'"], check=False)
+            try:
+                uid = subprocess.check_output(["id", "-u", user], text=True).strip()
+                bus_addr = subprocess.check_output(
+                    ["su", "-", user, "-c", "echo $DBUS_SESSION_BUS_ADDRESS"],
+                    text=True
+                ).strip()
+                if bus_addr:
+                    env["DBUS_SESSION_BUS_ADDRESS"] = bus_addr
+                env["DISPLAY"] = os.environ.get("DISPLAY", ":0")
+                subprocess.run(
+                    ["su", "-", user, "-c", f"DISPLAY={env['DISPLAY']} notify-send {repr(title)} {repr(message)}"],
+                    check=False
+                )
+            except Exception:
+                pass
         else:
-            subprocess.run(["notify-send", title, message], check=False)
+            subprocess.run(["notify-send", title, message], env=env, check=False)
 
     def _bw_event_listener(self, event):
         self.bw_stats["rx"] = event.read
         self.bw_stats["tx"] = event.written
 
     def start_bandwidth_listener(self):
-        if self.bw_listening: return
-        self.bw_listening = True
+        with self._bw_lock:
+            if self.bw_listening: return
+            self.bw_listening = True
         
         def listener():
-            try:
-                with Controller.from_port(port=self.config["tor_control_port"]) as controller:
-                    controller.authenticate()
-                    controller.add_event_listener(self._bw_event_listener, stem.control.EventType.BW)
-                    while self.bw_listening:
-                        time.sleep(1)
-            except Exception:
-                pass
+            while self.bw_listening:
+                try:
+                    with Controller.from_port(port=self.config["tor_control_port"]) as controller:
+                        controller.authenticate()
+                        controller.add_event_listener(self._bw_event_listener, stem.control.EventType.BW)
+                        while self.bw_listening:
+                            time.sleep(1)
+                except Exception:
+                    # Tor may have restarted; retry after a short wait
+                    time.sleep(5)
         
         self.bw_thread = threading.Thread(target=listener, daemon=True)
         self.bw_thread.start()
         
     def kill_switch_monitor(self):
-        while self.is_anonshield_active():
-            res = subprocess.run(["systemctl", "is-active", "tor"], capture_output=True, text=True)
-            if res.stdout.strip() != "active":
-                self.send_notification("🚨 KILL SWITCH ACTIVATED", "Tor service crashed! Network is safely locked.")
-                # We do not restore firewall. Network remains airgapped to prevent leaks.
+        while True:
+            if not self.is_anonshield_active():
                 break
+            try:
+                res = subprocess.run(
+                    ["systemctl", "is-active", "tor"],
+                    capture_output=True, text=True, timeout=5
+                )
+                if res.stdout.strip() != "active":
+                    self.send_notification("🚨 KILL SWITCH ACTIVATED", "Tor service crashed! Network is safely locked.")
+                    # Do not restore firewall — network stays airgapped to prevent leaks.
+                    break
+            except subprocess.TimeoutExpired:
+                pass
             time.sleep(3)
 
     def get_circuits(self):
+        if not HAS_STEM:
+            return []
         circuits_info = []
         try:
             with Controller.from_port(port=self.config["tor_control_port"]) as controller:
@@ -517,7 +591,10 @@ table inet anonshield {{
                     if circ.status == "BUILT" and circ.purpose == "GENERAL":
                         path = []
                         for i, entry in enumerate(circ.path):
-                            fingerprint, nickname = entry
+                            try:
+                                fingerprint, nickname = entry
+                            except (ValueError, TypeError):
+                                fingerprint = str(entry)
                             desc = controller.get_network_status(fingerprint, default=None)
                             if desc:
                                 ip = desc.address
@@ -533,11 +610,10 @@ table inet anonshield {{
         return circuits_info
         
     def start_mac_rotator(self, interval_minutes=15):
+        self._stop_rotator.clear()
         self.mac_rotator_active = True
         def rotator():
-            while self.mac_rotator_active:
-                time.sleep(interval_minutes * 60)
-                if not self.mac_rotator_active: break
+            while not self._stop_rotator.wait(timeout=interval_minutes * 60):
                 self.send_notification("Who Watches Watchers? MAC Rotator", "Auto-rotating Hardware MAC Addresses...")
                 for iface in self.get_interfaces():
                     try:
@@ -550,13 +626,17 @@ table inet anonshield {{
         self.mac_thread.start()
 
     def stop_mac_rotator(self):
+        self._stop_rotator.set()
         self.mac_rotator_active = False
 
     def start_hidden_service(self, target_port):
         try:
+            port = int(target_port)
+            if not (1 <= port <= 65535):
+                return "Error: Port must be between 1 and 65535"
             with Controller.from_port(port=self.config["tor_control_port"]) as controller:
                 controller.authenticate()
-                response = controller.create_ephemeral_hidden_service({80: target_port}, await_publication=True)
+                response = controller.create_ephemeral_hidden_service({80: port}, await_publication=True)
                 return response.service_id + ".onion"
         except Exception as e:
             return f"Error: {e}"
@@ -596,10 +676,11 @@ table inet anonshield {{
                         "ClientTransportPlugin": "obfs4 exec /usr/bin/obfs4proxy"
                     })
                 else:
+                    # Disable both atomically to avoid leaving Tor in a mixed state
                     controller.set_options({
-                        "UseBridges": "0"
+                        "UseBridges": "0",
+                        "ClientTransportPlugin": ""
                     })
-                    controller.reset_conf("ClientTransportPlugin")
                 return True
         except Exception:
             return False
@@ -609,13 +690,13 @@ table inet anonshield {{
             with Controller.from_port(port=self.config["tor_control_port"]) as controller:
                 controller.authenticate()
                 if bridge_lines:
-                    controller.set_options({
-                        "UseBridges": "1",
-                        "Bridge": bridge_lines,
-                    })
+                    # stem requires Bridge to be set one line at a time
+                    controller.set_options({"UseBridges": "1"})
+                    for bridge in bridge_lines:
+                        controller.set_conf("Bridge", bridge)
                 else:
-                    controller.set_options({"UseBridges": "0"})
                     controller.reset_conf("Bridge")
+                    controller.set_options({"UseBridges": "0"})
                 return True
         except Exception as e:
             console_print(f"[red]Failed to set custom bridges: {e}[/red]")
@@ -633,6 +714,10 @@ table inet anonshield {{
         console_print(f"[bold cyan]📦 Starting isolated sandbox for: {' '.join(cmd_args)}[/bold cyan]")
         
         try:
+            # Clean up any left-over interfaces from previous crashes before creating
+            subprocess.run(["ip", "netns", "delete", ns_name], check=False, capture_output=True)
+            subprocess.run(["ip", "link", "delete", "veth-anon"], check=False, capture_output=True)
+            
             subprocess.run(["ip", "netns", "add", ns_name], check=True, capture_output=True)
             subprocess.run(["ip", "link", "add", "veth-anon", "type", "veth", "peer", "name", "veth-ns"], check=True, capture_output=True)
             subprocess.run(["ip", "link", "set", "veth-ns", "netns", ns_name], check=True, capture_output=True)
@@ -646,7 +731,10 @@ table inet anonshield {{
             subprocess.run(["ip", "netns", "exec", ns_name, "ip", "route", "add", "default", "via", "10.192.1.1"], check=True, capture_output=True)
             
             console_print("[green]Sandbox ready. Executing command...[/green]")
-            subprocess.run(["ip", "netns", "exec", ns_name, "su", "-", user, "-c", " ".join(cmd_args)])
+            # Shell-escape command args to prevent injection when passed via -c
+            import shlex
+            safe_cmd = shlex.join(cmd_args)
+            subprocess.run(["ip", "netns", "exec", ns_name, "su", "-", user, "-c", safe_cmd])
             
         finally:
             console_print("[bold cyan]🧹 Cleaning up sandbox...[/bold cyan]")
@@ -664,8 +752,10 @@ table inet anonshield {{
         user = os.environ.get("SUDO_USER", "root")
         console_print(f"[bold cyan]🔓 Launching '{' '.join(cmd_args)}' bypassing Tor (Clearnet)[/bold cyan]")
         try:
-            cmd = " ".join(cmd_args)
-            subprocess.run(["sg", "anonshield-bypass", "-c", f"su - {user} -c '{cmd}'"])
+            import shlex
+            safe_cmd = shlex.join(cmd_args)
+            # sg changes effective GID to anonshield-bypass, nft rules allow that GID to bypass
+            subprocess.run(["su", "-", user, "-c", f"sg anonshield-bypass -c {shlex.quote(safe_cmd)}"])
         except Exception as e:
             console_print(f"[red]Error launching split-tunnel process: {e}[/red]")
 
@@ -675,9 +765,11 @@ table inet anonshield {{
 
     def check_tor_ip_status(self):
         endpoints = [
+            # Only check.torproject.org can authoritatively confirm Tor usage
             ("https://check.torproject.org/api/ip", lambda d: json.loads(d)),
-            ("https://api.ipify.org?format=json", lambda d: {"IP": json.loads(d).get("ip"), "IsTor": True}),
-            ("https://ifconfig.me/all.json", lambda d: {"IP": json.loads(d).get("ip_addr"), "IsTor": True})
+            # Fallbacks give IP only — IsTor is False since we cannot verify
+            ("https://api.ipify.org?format=json", lambda d: {"IP": json.loads(d).get("ip"), "IsTor": False}),
+            ("https://ifconfig.me/all.json", lambda d: {"IP": json.loads(d).get("ip_addr"), "IsTor": False})
         ]
         
         for url, parser in endpoints:
@@ -701,13 +793,16 @@ table inet anonshield {{
         if self.is_anonshield_active():
             console_print("[bold yellow]⚠️ Who Watches Watchers? transparent proxying is already active![/bold yellow]")
             return
-            
-        rprint(Panel.fit(
-            "[bold green]🛡️  WHO WATCHES WATCHERS? - INITIATING ANONYMITY ENGINE  🛡️[/bold green]\n"
-            "[dim]Securing Linux System using the Tor Network[/dim]\n"
-            "[bold magenta][link=https://guns.lol/grouvya]Created with ❤  by Grouvya![/link][/bold magenta]",
-            border_style="green"
-        ))
+        
+        if HAS_RICH:
+            rprint(Panel.fit(
+                "[bold green]🛡️  WHO WATCHES WATCHERS? - INITIATING ANONYMITY ENGINE  🛡️[/bold green]\n"
+                "[dim]Securing Linux System using the Tor Network[/dim]\n"
+                "[bold magenta][link=https://guns.lol/grouvya]Created with ❤  by Grouvya![/link][/bold magenta]",
+                border_style="green"
+            ))
+        else:
+            print("=== WHO WATCHES WATCHERS? - INITIATING ANONYMITY ENGINE ===")
 
         # 1. Spoof MACs if configured
         if self.config["spoof_mac_on_start"]:
@@ -723,6 +818,8 @@ table inet anonshield {{
         # 3. Wait for Tor circuit bootstrap
         is_terminal = hasattr(sys.stdout, 'isatty') and sys.stdout.isatty()
         
+        # Bootstrap timeout: 90s for cold starts, bridges, and slow connections
+        BOOTSTRAP_TIMEOUT = 90
         success = False
         if HAS_RICH and is_terminal:
             with Progress(
@@ -733,7 +830,7 @@ table inet anonshield {{
                 console=self.console
             ) as progress_bar:
                 task = progress_bar.add_task("[cyan]Connecting to Tor network...", total=100)
-                for _ in range(30):
+                for _ in range(BOOTSTRAP_TIMEOUT):
                     progress, summary = self.get_tor_bootstrap_status()
                     progress_bar.update(task, completed=progress, description=f"[cyan]Connecting... ({summary})")
                     if progress == 100:
@@ -742,7 +839,7 @@ table inet anonshield {{
                     time.sleep(1)
         elif is_terminal:
             print("Waiting for Tor to bootstrap...")
-            for _ in range(30):
+            for _ in range(BOOTSTRAP_TIMEOUT):
                 progress, summary = self.get_tor_bootstrap_status()
                 bar_len = 20
                 filled_len = int(bar_len * progress / 100)
@@ -755,9 +852,9 @@ table inet anonshield {{
                     break
                 time.sleep(1)
         else:
-            # GUI mode or non-interactive, don't spam progress bar to console
+            # GUI mode or non-interactive
             console_print("[cyan]Waiting for Tor circuit bootstrap (connecting to network)...[/cyan]")
-            for _ in range(30):
+            for _ in range(BOOTSTRAP_TIMEOUT):
                 progress, summary = self.get_tor_bootstrap_status()
                 if progress == 100:
                     success = True
@@ -767,14 +864,14 @@ table inet anonshield {{
                 console_print("[green]✓ Connected to Tor network successfully![/green]")
 
         if not success:
-            console_print("[bold red]✗ Tor service failed to bootstrap within 30 seconds.[/bold red]")
+            console_print(f"[bold red]✗ Tor service failed to bootstrap within {BOOTSTRAP_TIMEOUT} seconds.[/bold red]")
             console_print("[yellow]Aborting shield start to prevent locking you out of the internet. Rolling back...[/yellow]")
             self.stop_shield()
             return
 
         # 4. Configure systemd-resolved to use Tor DNS port
         console_print("[bold cyan]🔌 Directing system DNS to Tor secure resolver...[/bold cyan]")
-        self.configure_systemd_resolved(enable=True)
+        # self.configure_systemd_resolved(enable=True) # Disabled to prevent systemd-resolved breakage; nftables handles DNS interception
 
         # 5. Apply Firewall rules
         console_print("[bold cyan]🧱 Applying transparent proxy firewall rules and kill-switch...[/bold cyan]")
@@ -783,7 +880,7 @@ table inet anonshield {{
             console_print("[green]✓ Firewall active. All outbound traffic forced through Tor.[/green]")
         except Exception as e:
             console_print(f"[bold red]✗ Failed to apply firewall: {e}. Reverting DNS...[/bold red]")
-            self.configure_systemd_resolved(enable=False)
+            # self.configure_systemd_resolved(enable=False)
             self.restore_macs()
             return
 
@@ -836,14 +933,17 @@ table inet anonshield {{
     def stop_shield(self):
         self.check_root()
         
-        rprint(Panel.fit(
-            "[bold red]🛡️  WHO WATCHES WATCHERS? - DEACTIVATING ANONYMITY ENGINE  🛡️[/bold red]\n"
-            "[dim]Restoring system network settings to default[/dim]",
-            border_style="red"
-        ))
+        if HAS_RICH:
+            rprint(Panel.fit(
+                "[bold red]🛡️  WHO WATCHES WATCHERS? - DEACTIVATING ANONYMITY ENGINE  🛡️[/bold red]\n"
+                "[dim]Restoring system network settings to default[/dim]",
+                border_style="red"
+            ))
+        else:
+            print("=== WHO WATCHES WATCHERS? - DEACTIVATING ANONYMITY ENGINE ===")
         
         console_print("[bold cyan]🔌 Restoring default system DNS configurations...[/bold cyan]")
-        self.configure_systemd_resolved(enable=False)
+        # self.configure_systemd_resolved(enable=False)
         console_print("[green]✓ DNS settings restored.[/green]")
         
         console_print("[bold cyan]🧱 Removing transparent proxy firewall rules and kill-switch...[/bold cyan]")
@@ -862,8 +962,11 @@ table inet anonshield {{
         is_active = False
         if is_root:
             is_active = self.is_anonshield_active()
-            
-        tor_status = self.check_tor_ip_status()
+        
+        try:
+            tor_status = self.check_tor_ip_status()
+        except Exception:
+            tor_status = None
         service_status = "Stopped"
         try:
             res = subprocess.run(["systemctl", "is-active", "tor"], capture_output=True, text=True)
@@ -1075,6 +1178,7 @@ cat << 'EOF_BUNDLE' > "/tmp/anonshield_gui.py"
 #!/usr/bin/env python3
 import os
 import sys
+import shlex
 import time
 import threading
 import subprocess
@@ -1098,7 +1202,7 @@ ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
 
 # Ensure we can import from the directory
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, "/opt/anonshield")
 from anonshield import AnonShield
 
 # Styling Constants (Modern Flat Dark Theme)
@@ -1144,6 +1248,10 @@ class StdoutRedirector:
     def flush(self): pass
 
 def create_tray_image():
+    try:
+        return Image.open("/opt/anonshield/icon.png")
+    except Exception:
+        pass
     image = Image.new('RGBA', (64, 64), (0, 0, 0, 0))
     dc = ImageDraw.Draw(image)
     # Draw a glowing eye/shield
@@ -1183,8 +1291,14 @@ class BandwidthGraph(ctk.CTkFrame):
         self.line_rx.set_ydata(self.rx_data)
         self.line_tx.set_ydata(self.tx_data)
         
-        if hasattr(self, 'fill_rx'): self.fill_rx.remove()
-        if hasattr(self, 'fill_tx'): self.fill_tx.remove()
+        try:
+            self.fill_rx.remove()
+        except (AttributeError, ValueError):
+            pass
+        try:
+            self.fill_tx.remove()
+        except (AttributeError, ValueError):
+            pass
         
         x = range(self.max_points)
         self.fill_rx = self.ax.fill_between(x, 0, self.rx_data, color=COLOR_CYAN, alpha=0.15)
@@ -1205,6 +1319,19 @@ class AnonShieldGUI:
         self.root.minsize(980, 800)
         self.root.configure(fg_color=BG_MAIN)
         
+        # Load app icon - must use PIL for PNG with alpha on some Tk versions
+        try:
+            from PIL import Image as _PILImage, ImageTk as _ImageTk
+            _img = _PILImage.open("/opt/anonshield/icon.png").resize((64, 64))
+            self._icon_photo = _ImageTk.PhotoImage(_img)  # keep reference to prevent GC
+            self.root.iconphoto(True, self._icon_photo)
+        except Exception:
+            try:
+                icon_img = tk.PhotoImage(file="/opt/anonshield/icon.png")
+                self.root.iconphoto(True, icon_img)
+            except Exception as e:
+                print(f"[Warning] Could not load window icon: {e}")
+
         self.shield = AnonShield()
         self.shield.check_root()
 
@@ -1214,46 +1341,54 @@ class AnonShieldGUI:
         sys.stdout = StdoutRedirector(self.console_widget)
         sys.stderr = StdoutRedirector(self.console_widget)
 
-        self.action_lock = False
+        self.action_lock = threading.Lock()
+        self._action_running = False
         self.tray_icon = None
         self.active_onion = None
+        self.active_onion_id = None
         
         self.root.protocol("WM_DELETE_WINDOW", self.hide_window)
         
+        self.setup_tray_icon()
         self.show_disclaimer_popup()
         self.poll_system_state()
 
-    def hide_window(self):
+    def setup_tray_icon(self):
+        if not HAS_PYSTRAY: return
+        if self.tray_icon: return
+        menu = pystray.Menu(
+            pystray.MenuItem("Show GUI", self.show_window, default=True),
+            pystray.MenuItem("Hide in Tray", self.hide_window),
+            pystray.MenuItem("Quit", self.quit_app)
+        )
+        self.tray_icon = pystray.Icon("Who Watches Watchers?", create_tray_image(), "Who Watches Watchers?", menu)
+        threading.Thread(target=self.tray_icon.run, daemon=True).start()
+
+    def hide_window(self, icon=None, item=None):
         if not HAS_PYSTRAY:
             self.quit_app()
             return
-            
-        self.root.withdraw()
-        if not self.tray_icon:
-            menu = pystray.Menu(
-                pystray.MenuItem("Show GUI", self.show_window, default=True),
-                pystray.MenuItem("Quit", self.quit_app)
-            )
-            self.tray_icon = pystray.Icon("Who Watches Watchers?", create_tray_image(), "Who Watches Watchers?", menu)
-            threading.Thread(target=self.tray_icon.run, daemon=True).start()
+        self.root.after(0, self.root.withdraw)
 
     def show_window(self, icon=None, item=None):
-        if self.tray_icon:
-            self.tray_icon.stop()
-            self.tray_icon = None
         self.root.after(0, self.root.deiconify)
 
     def quit_app(self, icon=None, item=None):
         if self.tray_icon:
             self.tray_icon.stop()
+            self.tray_icon = None
+        # Restore stdout/stderr before destroying the widget they write to
+        sys.stdout = sys.__stdout__
+        sys.stderr = sys.__stderr__
         print("\n[Info] Quitting application. Stopping Anonymizer...")
         try:
             self.shield.stop_shield()
-            if hasattr(self, 'active_onion') and self.active_onion:
-                self.shield.stop_hidden_service(self.active_onion.split(".")[0])
+            if self.active_onion_id:
+                self.shield.stop_hidden_service(self.active_onion_id)
         except Exception as e:
             print(f"[Error] Failed to stop proxy cleanly: {e}")
         self.root.quit()
+        self.root.destroy()
         sys.exit(0)
 
     def show_disclaimer_popup(self):
@@ -1264,6 +1399,8 @@ class AnonShieldGUI:
         popup.geometry("600x350")
         popup.resizable(False, False)
         popup.attributes("-topmost", True)
+        popup.lift()
+        popup.focus_force()
         
         popup.update_idletasks()
         x = (popup.winfo_screenwidth() // 2) - (600 // 2)
@@ -1272,7 +1409,7 @@ class AnonShieldGUI:
         
         def on_decline():
             print("Disclaimer declined. Exiting application.")
-            sys.exit(0)
+            self.quit_app()
             
         def on_accept():
             popup.destroy()
@@ -1526,10 +1663,35 @@ class AnonShieldGUI:
         self.obfs4_switch.configure(state=state_val)
         self.btn_bypass.configure(state=state_val)
         self.btn_hidden.configure(state=state_val)
-        self.action_lock = not enabled
+        with self.action_lock:
+            pass  # Lock exists; action_lock is now a threading.Lock for thread safety
+        # Use a simple flag bool for UI-thread checks (Tkinter is single-threaded for UI)
+        self._action_running = not enabled
+
+    def show_loading_screen(self, title, message):
+        self.loading_window = ctk.CTkToplevel(self.root)
+        self.loading_window.title(title)
+        self.loading_window.geometry("300x150")
+        self.loading_window.transient(self.root)
+        self.loading_window.wait_visibility()
+        self.loading_window.grab_set()
+        
+        lbl = ctk.CTkLabel(self.loading_window, text=message, font=("Helvetica", 12))
+        lbl.pack(pady=(30, 10))
+        
+        self.loading_bar = ctk.CTkProgressBar(self.loading_window, mode="indeterminate")
+        self.loading_bar.pack(pady=10)
+        self.loading_bar.start()
+
+    def hide_loading_screen(self):
+        if hasattr(self, 'loading_window') and self.loading_window:
+            self.loading_bar.stop()
+            self.loading_window.destroy()
+            self.loading_window = None
 
     def _poll_loop(self):
         last_ip_check = 0
+        last_circuit_check = 0
         cached_tor_status = None
         is_active = False
         mac_spoof_active = False
@@ -1546,7 +1708,7 @@ class AnonShieldGUI:
                     service_status = "Running"
                 progress, summary = self.shield.get_tor_bootstrap_status()
                 
-                if not self.action_lock:
+                if not self._action_running:
                     is_active = self.shield.is_anonshield_active()
 
                     current_time = time.time()
@@ -1554,17 +1716,20 @@ class AnonShieldGUI:
                         try:
                             cached_tor_status = self.shield.check_tor_ip_status()
                         except Exception:
-                            pass
+                            cached_tor_status = None
                         last_ip_check = current_time
 
                     mac_spoof_active = os.path.exists("/var/lib/anonshield/state.json")
                     rx = self.shield.bw_stats.get("rx", 0) / 1024
                     tx = self.shield.bw_stats.get("tx", 0) / 1024
 
-                    # Fetch circuits
-                    circuits = []
-                    if is_active:
-                        circuits = self.shield.get_circuits()
+                    # Rate-limit circuit fetching to every 15s (each call opens a Tor control connection)
+                    if is_active and current_time - last_circuit_check > 15:
+                        try:
+                            circuits = self.shield.get_circuits()
+                            last_circuit_check = current_time
+                        except Exception:
+                            circuits = []
 
                 tor_status = cached_tor_status
                 self.root.after(0, lambda ia=is_active, ts=tor_status, ss=service_status, p=progress, s=summary, msa=mac_spoof_active, r=rx, t=tx, c=circuits: self.update_state_ui(
@@ -1660,9 +1825,10 @@ class AnonShieldGUI:
             return
             
         if self.active_onion:
-            # Stop existing service
-            self.shield.stop_hidden_service(self.active_onion.split(".")[0])
+            # Stop existing service using stored service ID
+            self.shield.stop_hidden_service(self.active_onion_id or self.active_onion.replace(".onion", ""))
             self.active_onion = None
+            self.active_onion_id = None
             self.btn_hidden.configure(text="🧅 Host Hidden Service (.onion)", fg_color=COLOR_BUTTON_BG)
             print("\n[Info] Hidden Service successfully taken offline.")
             return
@@ -1680,10 +1846,12 @@ class AnonShieldGUI:
                 return
                 
             self.active_onion = onion
+            # Store service ID separately (without .onion suffix) for reliable stopping
+            self.active_onion_id = onion.replace(".onion", "")
             self.btn_hidden.configure(text="🔴 Stop Hidden Service", fg_color=COLOR_EXPOSED)
             print(f"\n[Success] 🧅 HIDDEN SERVICE IS LIVE!\nLocal Port: {port}\nOnion URL: {onion}")
         except ValueError:
-            messagebox.showerror("Error", "Port must be an integer.")
+            messagebox.showerror("Error", "Port must be a valid integer (1-65535).")
 
     
     def on_custom_bridges(self):
@@ -1709,7 +1877,13 @@ class AnonShieldGUI:
         ctk.CTkLabel(dialog, text="Select an application to launch on the Clearnet:", font=("Helvetica", 14, "bold")).pack(pady=(15, 10), padx=20, anchor="w")
         
         apps = {}
-        paths = ["/usr/share/applications", os.path.expanduser("~/.local/share/applications")]
+        real_user = os.environ.get("SUDO_USER", "root")
+        try:
+            import pwd as _pwd
+            real_home = _pwd.getpwnam(real_user).pw_dir
+        except Exception:
+            real_home = os.path.expanduser("~")
+        paths = ["/usr/share/applications", os.path.join(real_home, ".local/share/applications")]
         for path in paths:
             if not os.path.exists(path): continue
             for file in os.listdir(path):
@@ -1744,13 +1918,13 @@ class AnonShieldGUI:
             if not sel: return messagebox.showerror("Error", "Please select an application.", parent=dialog)
             cmd_str = custom_entry.get().strip() if sel == "__custom__" else apps.get(sel, "")
             if cmd_str:
-                threading.Thread(target=lambda: self.shield.bypass_command(cmd_str.split()), daemon=True).start()
+                threading.Thread(target=lambda: self.shield.bypass_command(shlex.split(cmd_str)), daemon=True).start()
                 messagebox.showinfo("Success", f"Launched on Clearnet: {cmd_str}", parent=dialog)
                 dialog.destroy()
         ctk.CTkButton(dialog, text="Launch (Bypass)", command=launch, fg_color="#F59E0B", text_color="#121214").pack(pady=15)
 
     def on_start_shield(self):
-        if self.action_lock: return
+        if self._action_running: return
         if self.shield.is_anonshield_active():
             messagebox.showinfo("Who Watches Watchers?", "Who Watches Watchers? Transparent Proxy is already active.")
             return
@@ -1771,7 +1945,7 @@ class AnonShieldGUI:
         threading.Thread(target=run, daemon=True).start()
 
     def on_stop_shield(self):
-        if self.action_lock: return
+        if self._action_running: return
         if not self.shield.is_anonshield_active():
             messagebox.showinfo("Who Watches Watchers?", "Who Watches Watchers? Anonymizer is already offline.")
             return
@@ -1799,12 +1973,13 @@ class AnonShieldGUI:
             print(f"\n[Error] Failed to open browser: {e}")
 
     def on_new_identity(self):
-        if self.action_lock: return
+        if self._action_running: return
         if not self.shield.is_anonshield_active():
             messagebox.showerror("Error", "Start Who Watches Watchers? anonymization first before requesting a new circuit.")
             return
 
         self.set_controls_state(False)
+        self.show_loading_screen("Rotating Identity", "Requesting new Tor circuit...\nPlease wait.")
         
         def run():
             try:
@@ -1812,6 +1987,7 @@ class AnonShieldGUI:
             except Exception as e:
                 print(f"\n[Error]: {e}")
             finally:
+                self.root.after(0, self.hide_loading_screen)
                 self.root.after(0, lambda: self.set_controls_state(True))
                 
         threading.Thread(target=run, daemon=True).start()
