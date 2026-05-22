@@ -99,7 +99,7 @@ do_install() {
         PM="apt-get"
         export DEBIAN_FRONTEND=noninteractive
         apt-get update -qq
-        apt-get install -y -qq tor macchanger nftables python3-rich python3-tk polkitd python3-pip python3-stem obfs4proxy libnotify-bin gir1.2-ayatanaappindicator3-0.1 libayatana-appindicator3-1 > /dev/null
+        apt-get install -y -qq tor macchanger nftables python3-rich python3-tk polkitd python3-pip python3-venv python3-stem obfs4proxy libnotify-bin gir1.2-ayatanaappindicator3-0.1 libayatana-appindicator3-1 > /dev/null
     elif command -v dnf >/dev/null 2>&1; then
         PM="dnf"
         dnf install -y -q tor macchanger nftables python3-rich python3-tkinter polkit pip python3-stem obfs4 libnotify libappindicator-gtk3 > /dev/null
@@ -118,18 +118,21 @@ do_install() {
       exit 1
     fi
 
-    echo -e "\n  ${BOLD}Installing additional Python packages...${NC}"
-    pip3 install --break-system-packages customtkinter stem pystray Pillow > /dev/null 2>&1 || pip3 install customtkinter stem pystray Pillow > /dev/null 2>&1
-    if [ $? -eq 0 ]; then
-      echo -e "  ${GREEN}✓${NC} Installed Python pip packages: customtkinter, stem, pystray, Pillow"
-    else
-      echo -e "  ${RED}✗${NC} Failed to install pip dependencies. Please check your internet connection."
-      exit 1
-    fi
+
 
     # 4. Create App Directories
     echo -e "\n${BOLD}${BLUE}[2/5]${NC} Creating application directories and permissions..."
     mkdir -p "$APP_DIR"
+    
+    echo -e "\n  ${BOLD}Installing additional Python packages inside virtual environment...${NC}"
+    python3 -m venv "$APP_DIR/venv"
+    "$APP_DIR/venv/bin/pip" install customtkinter stem pystray Pillow matplotlib rich > /dev/null 2>&1
+    if [ $? -eq 0 ]; then
+      echo -e "  ${GREEN}✓${NC} Installed Python pip packages in venv: customtkinter, stem, pystray, Pillow, matplotlib, rich"
+    else
+      echo -e "  ${RED}✗${NC} Failed to install pip dependencies in venv."
+      exit 1
+    fi
     mkdir -p "$CONF_DIR"
     mkdir -p "$STATE_DIR"
     chmod 700 "$STATE_DIR"
@@ -1062,6 +1065,10 @@ import webbrowser
 import tkinter as tk
 from tkinter import messagebox
 import customtkinter as ctk
+import matplotlib.pyplot as plt
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+import matplotlib.animation as animation
+from collections import deque
 try:
     import pystray
     from PIL import Image, ImageDraw
@@ -1124,6 +1131,43 @@ def create_tray_image():
     dc = ImageDraw.Draw(image)
     dc.rectangle((16, 16, 48, 48), fill=COLOR_CYAN)
     return image
+
+
+class BandwidthGraph(ctk.CTkFrame):
+    def __init__(self, master, **kwargs):
+        super().__init__(master, **kwargs)
+        self.max_points = 60
+        self.rx_data = deque([0]*self.max_points, maxlen=self.max_points)
+        self.tx_data = deque([0]*self.max_points, maxlen=self.max_points)
+        plt.style.use('dark_background')
+        self.fig, self.ax = plt.subplots(figsize=(5, 1.5), dpi=100)
+        self.fig.patch.set_facecolor('#1A1A22')
+        self.ax.set_facecolor('#0A0A0F')
+        self.ax.tick_params(colors='#94A3B8', labelsize=8)
+        self.ax.spines['bottom'].set_color('#2D2D44')
+        self.ax.spines['top'].set_visible(False)
+        self.ax.spines['right'].set_visible(False)
+        self.ax.spines['left'].set_color('#2D2D44')
+        self.line_rx, = self.ax.plot(self.rx_data, label='Rx (KB/s)', color='#00E5FF', linewidth=1.5)
+        self.line_tx, = self.ax.plot(self.tx_data, label='Tx (KB/s)', color='#00FF66', linewidth=1.5)
+        self.ax.legend(loc='upper left', fontsize=8, frameon=False, labelcolor='#E2E8F0')
+        self.ax.set_ylim(0, 100)
+        self.ax.set_xlim(0, self.max_points)
+        self.ax.set_xticks([])
+        self.canvas = FigureCanvasTkAgg(self.fig, master=self)
+        self.canvas.draw()
+        self.canvas.get_tk_widget().pack(fill="both", expand=True)
+    def update_graph(self, rx, tx):
+        self.rx_data.append(rx)
+        self.tx_data.append(tx)
+        self.line_rx.set_ydata(self.rx_data)
+        self.line_tx.set_ydata(self.tx_data)
+        max_val = max(max(self.rx_data), max(self.tx_data))
+        if max_val > self.ax.get_ylim()[1] * 0.9:
+            self.ax.set_ylim(0, max_val * 1.5)
+        elif max_val < self.ax.get_ylim()[1] * 0.3 and self.ax.get_ylim()[1] > 100:
+            self.ax.set_ylim(0, max(100, max_val * 1.5))
+        self.canvas.draw()
 
 class AnonShieldGUI:
     def __init__(self, root):
@@ -1300,9 +1344,9 @@ class AnonShieldGUI:
         self.val_mac = ctk.CTkLabel(details_frame, text="Checking...", text_color=FG_TEXT, font=self.font_value)
         self.val_mac.grid(row=3, column=1, sticky="w", padx=10, pady=5)
 
-        ctk.CTkLabel(details_frame, text="Live Bandwidth:", text_color=FG_MUTED, font=self.font_label).grid(row=4, column=0, sticky="w", pady=5)
-        self.val_bw = ctk.CTkLabel(details_frame, text="Rx: 0 KB/s | Tx: 0 KB/s", text_color=COLOR_CYAN, font=self.font_value)
-        self.val_bw.grid(row=4, column=1, sticky="w", padx=10, pady=5)
+        ctk.CTkLabel(details_frame, text="Live Bandwidth:", text_color=FG_MUTED, font=self.font_label).grid(row=4, column=0, sticky="nw", pady=5)
+        self.graph = BandwidthGraph(details_frame)
+        self.graph.grid(row=4, column=1, sticky="we", padx=10, pady=5)
 
         ctk.CTkLabel(details_frame, text="Tor Circuit:", text_color=FG_MUTED, font=self.font_label).grid(row=5, column=0, sticky="nw", pady=5)
         self.val_circuit = ctk.CTkLabel(details_frame, text="Waiting for route...", text_color=COLOR_ONION, font=self.font_value, justify="left", wraplength=400)
@@ -1359,6 +1403,13 @@ class AnonShieldGUI:
             progress_color=COLOR_SECURE
         )
         self.obfs4_switch.pack(anchor="w", pady=(0, 10))
+        self.btn_custom_bridges = ctk.CTkButton(
+            opts_frame, text="🌉 Custom Bridges", fg_color=COLOR_BUTTON_BG,
+            font=self.font_label, hover_color=COLOR_BUTTON_HOVER,
+            command=self.on_custom_bridges, cursor="hand2", border_width=1,
+            border_color="#2D2D44", text_color=FG_TEXT, corner_radius=6, height=30
+        )
+        self.btn_custom_bridges.pack(fill="x", pady=(0, 10))
 
         self.mac_rotator_var = ctk.BooleanVar(value=False)
         self.mac_rotator_switch = ctk.CTkSwitch(
@@ -1532,7 +1583,7 @@ class AnonShieldGUI:
         mac_color = COLOR_SECURE if mac_spoof_active else FG_TEXT
         self.val_mac.configure(text=mac_desc, text_color=mac_color)
         
-        self.val_bw.configure(text=f"Rx: {rx:.1f} KB/s | Tx: {tx:.1f} KB/s")
+        self.graph.update_graph(rx, tx)
         
         if circuits:
             # Show up to 3 active circuits
@@ -1564,12 +1615,7 @@ class AnonShieldGUI:
             messagebox.showinfo("Who Watches Watchers?", "Who Watches Watchers? must be active to use Split Tunneling.")
             return
             
-        dialog = ctk.CTkInputDialog(text="Enter command to launch directly on Clearnet (e.g. 'firefox'):", title="Split Tunneling")
-        cmd = dialog.get_input()
-        if cmd:
-            def run():
-                self.shield.bypass_command(cmd.split())
-            threading.Thread(target=run, daemon=True).start()
+        self.show_split_tunnel_dialog()
 
     def on_hidden_service(self):
         if not self.shield.is_anonshield_active():
@@ -1601,6 +1647,70 @@ class AnonShieldGUI:
             print(f"\n[Success] 🧅 HIDDEN SERVICE IS LIVE!\nLocal Port: {port}\nOnion URL: {onion}")
         except ValueError:
             messagebox.showerror("Error", "Port must be an integer.")
+
+    
+    def on_custom_bridges(self):
+        dialog = ctk.CTkToplevel(self.root)
+        dialog.title("Custom Tor Bridges")
+        dialog.geometry("500x400")
+        dialog.attributes("-topmost", True)
+        ctk.CTkLabel(dialog, text="Paste your custom Tor Bridge lines below (one per line):", font=("Helvetica", 12, "bold")).pack(pady=(15, 5), padx=20, anchor="w")
+        textbox = ctk.CTkTextbox(dialog, height=200, fg_color="#0A0A0F", border_width=1, border_color="#2D2D44")
+        textbox.pack(fill="x", padx=20, pady=15)
+        def save():
+            bridges = [line.strip() for line in textbox.get("1.0", "end-1c").split("\n") if line.strip()]
+            self.shield.set_custom_bridges(bridges)
+            messagebox.showinfo("Success", "Custom bridges applied successfully.", parent=dialog)
+            dialog.destroy()
+        ctk.CTkButton(dialog, text="Save & Apply", command=save, fg_color="#00E5FF", text_color="#121214").pack(pady=10)
+
+    def show_split_tunnel_dialog(self):
+        dialog = ctk.CTkToplevel(self.root)
+        dialog.title("Split Tunneling (Bypass Tor)")
+        dialog.geometry("500x500")
+        dialog.attributes("-topmost", True)
+        ctk.CTkLabel(dialog, text="Select an application to launch on the Clearnet:", font=("Helvetica", 14, "bold")).pack(pady=(15, 10), padx=20, anchor="w")
+        
+        apps = {}
+        paths = ["/usr/share/applications", os.path.expanduser("~/.local/share/applications")]
+        for path in paths:
+            if not os.path.exists(path): continue
+            for file in os.listdir(path):
+                if file.endswith(".desktop"):
+                    try:
+                        with open(os.path.join(path, file), "r", encoding="utf-8") as f:
+                            name = ""
+                            exec_cmd = ""
+                            for line in f:
+                                if line.startswith("Name=") and not name:
+                                    name = line.strip().split("=", 1)[1]
+                                elif line.startswith("Exec=") and not exec_cmd:
+                                    parts = line.strip().split("=", 1)[1].split()
+                                    exec_cmd = " ".join([p for p in parts if not p.startswith('%')])
+                            if name and exec_cmd: apps[name] = exec_cmd
+                    except: pass
+                    
+        scrollable_frame = ctk.CTkScrollableFrame(dialog, fg_color="#0A0A0F")
+        scrollable_frame.pack(fill="both", expand=True, padx=20, pady=10)
+        selected_app = ctk.StringVar(value="")
+        for name in sorted(apps.keys()):
+            ctk.CTkRadioButton(scrollable_frame, text=name, variable=selected_app, value=name).pack(anchor="w", pady=5)
+            
+        custom_frame = ctk.CTkFrame(dialog, fg_color="transparent")
+        custom_frame.pack(fill="x", padx=20, pady=5)
+        ctk.CTkRadioButton(custom_frame, text="Custom Command:", variable=selected_app, value="__custom__").pack(side="left")
+        custom_entry = ctk.CTkEntry(custom_frame, placeholder_text="e.g. ping google.com")
+        custom_entry.pack(side="left", fill="x", expand=True, padx=(10, 0))
+            
+        def launch():
+            sel = selected_app.get()
+            if not sel: return messagebox.showerror("Error", "Please select an application.", parent=dialog)
+            cmd_str = custom_entry.get().strip() if sel == "__custom__" else apps.get(sel, "")
+            if cmd_str:
+                threading.Thread(target=lambda: self.shield.bypass_command(cmd_str.split()), daemon=True).start()
+                messagebox.showinfo("Success", f"Launched on Clearnet: {cmd_str}", parent=dialog)
+                dialog.destroy()
+        ctk.CTkButton(dialog, text="Launch (Bypass)", command=launch, fg_color="#F59E0B", text_color="#121214").pack(pady=15)
 
     def on_start_shield(self):
         if self.action_lock: return
@@ -1679,6 +1789,8 @@ if __name__ == "__main__":
     main()
 
 EOF_BUNDLE
+\nEOF_BUNDLE\n
+EOF_BUNDLE
 
 cat << 'EOF_BUNDLE' > "/tmp/anonshield.conf"
 [anonshield]
@@ -1749,7 +1861,14 @@ echo -e "iVBORw0KGgoAAAANSUhEUgAABAAAAAQACAYAAAB/HSuDAAEAAElEQVR4nOz993sd15Ev/H6
 
     cp "/tmp/anonshield_gui.py" "$APP_DIR/anonshield_gui.py"
     chmod +x "$APP_DIR/anonshield_gui.py"
-    ln -sf "$APP_DIR/anonshield_gui.py" "/usr/local/bin/anonshield-gui"
+    
+    # Create wrapper script for venv
+    cat << 'EOF_WRAP' > "/usr/local/bin/anonshield-gui"
+#!/bin/bash
+/opt/anonshield/venv/bin/python /opt/anonshield/anonshield_gui.py
+EOF_WRAP
+    chmod +x "/usr/local/bin/anonshield-gui"
+
     echo -e "  ${GREEN}✓${NC} Installed GUI binary to /usr/local/bin/anonshield-gui"
 
     cp "/tmp/anonshield_icon.png" "$APP_DIR/icon.png"
