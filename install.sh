@@ -1129,7 +1129,9 @@ class StdoutRedirector:
 def create_tray_image():
     image = Image.new('RGBA', (64, 64), (0, 0, 0, 0))
     dc = ImageDraw.Draw(image)
-    dc.rectangle((16, 16, 48, 48), fill=COLOR_CYAN)
+    # Draw a glowing eye/shield
+    dc.ellipse((8, 8, 56, 56), fill="#18181B", outline=COLOR_SECURE, width=4)
+    dc.ellipse((24, 24, 40, 40), fill=COLOR_CYAN)
     return image
 
 
@@ -1141,16 +1143,17 @@ class BandwidthGraph(ctk.CTkFrame):
         self.tx_data = deque([0]*self.max_points, maxlen=self.max_points)
         plt.style.use('dark_background')
         self.fig, self.ax = plt.subplots(figsize=(5, 1.5), dpi=100)
-        self.fig.patch.set_facecolor('#1A1A22')
-        self.ax.set_facecolor('#0A0A0F')
-        self.ax.tick_params(colors='#94A3B8', labelsize=8)
-        self.ax.spines['bottom'].set_color('#2D2D44')
+        self.fig.patch.set_facecolor(BG_CARD)
+        self.ax.set_facecolor(BG_CARD)
+        self.ax.tick_params(colors=FG_MUTED, labelsize=8)
+        self.ax.spines['bottom'].set_visible(False)
         self.ax.spines['top'].set_visible(False)
         self.ax.spines['right'].set_visible(False)
-        self.ax.spines['left'].set_color('#2D2D44')
-        self.line_rx, = self.ax.plot(self.rx_data, label='Rx (KB/s)', color='#00E5FF', linewidth=1.5)
-        self.line_tx, = self.ax.plot(self.tx_data, label='Tx (KB/s)', color='#00FF66', linewidth=1.5)
-        self.ax.legend(loc='upper left', fontsize=8, frameon=False, labelcolor='#E2E8F0')
+        self.ax.spines['left'].set_visible(False)
+        self.ax.grid(color='#27272A', linestyle='--', linewidth=0.5, alpha=0.5)
+        self.line_rx, = self.ax.plot(self.rx_data, label='Rx (KB/s)', color=COLOR_CYAN, linewidth=2.0)
+        self.line_tx, = self.ax.plot(self.tx_data, label='Tx (KB/s)', color=COLOR_SECURE, linewidth=2.0)
+        self.ax.legend(loc='upper left', fontsize=8, frameon=False, labelcolor=FG_TEXT)
         self.ax.set_ylim(0, 100)
         self.ax.set_xlim(0, self.max_points)
         self.ax.set_xticks([])
@@ -1162,6 +1165,14 @@ class BandwidthGraph(ctk.CTkFrame):
         self.tx_data.append(tx)
         self.line_rx.set_ydata(self.rx_data)
         self.line_tx.set_ydata(self.tx_data)
+        
+        if hasattr(self, 'fill_rx'): self.fill_rx.remove()
+        if hasattr(self, 'fill_tx'): self.fill_tx.remove()
+        
+        x = range(self.max_points)
+        self.fill_rx = self.ax.fill_between(x, 0, self.rx_data, color=COLOR_CYAN, alpha=0.15)
+        self.fill_tx = self.ax.fill_between(x, 0, self.tx_data, color=COLOR_SECURE, alpha=0.15)
+
         max_val = max(max(self.rx_data), max(self.tx_data))
         if max_val > self.ax.get_ylim()[1] * 0.9:
             self.ax.set_ylim(0, max_val * 1.5)
@@ -1408,7 +1419,7 @@ class AnonShieldGUI:
             opts_frame, text="🌉 Custom Bridges", fg_color=COLOR_BUTTON_BG,
             font=self.font_label, hover_color=COLOR_BUTTON_HOVER,
             command=self.on_custom_bridges, cursor="hand2", border_width=1,
-            border_color="#2D2D44", text_color=FG_TEXT, corner_radius=6, height=30
+            border_color="#2D2D44", text_color=FG_TEXT, corner_radius=12, height=30
         )
         self.btn_custom_bridges.pack(fill="x", pady=(0, 10))
 
@@ -1485,7 +1496,7 @@ class AnonShieldGUI:
             parent, text=text, fg_color=COLOR_BUTTON_BG,
             font=self.font_label, hover_color=COLOR_BUTTON_HOVER,
             command=command, cursor="hand2", border_width=1,
-            border_color="#2D2D44", text_color=FG_TEXT, corner_radius=6, height=40
+            border_color="#2D2D44", text_color=FG_TEXT, corner_radius=12, height=40
         )
         return btn
 
