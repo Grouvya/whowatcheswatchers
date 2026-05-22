@@ -1218,6 +1218,13 @@ class AnonShieldGUI:
     def quit_app(self, icon=None, item=None):
         if self.tray_icon:
             self.tray_icon.stop()
+        print("\n[Info] Quitting application. Stopping Anonymizer...")
+        try:
+            self.shield.stop_shield()
+            if hasattr(self, 'active_onion') and self.active_onion:
+                self.shield.stop_hidden_service(self.active_onion.split(".")[0])
+        except Exception as e:
+            print(f"[Error] Failed to stop proxy cleanly: {e}")
         self.root.quit()
         sys.exit(0)
 
@@ -1295,6 +1302,10 @@ class AnonShieldGUI:
         body_frame = ctk.CTkFrame(self.root, fg_color=BG_MAIN, corner_radius=0)
         body_frame.pack(fill="both", expand=True, padx=20)
 
+        # RIGHT COLUMN
+        right_frame = ctk.CTkScrollableFrame(body_frame, fg_color=BG_MAIN, width=340, corner_radius=0)
+        right_frame.pack(side="right", fill="both", padx=(10, 0))
+
         # LEFT COLUMN
         left_frame = ctk.CTkFrame(body_frame, fg_color=BG_MAIN, corner_radius=0)
         left_frame.pack(side="left", fill="both", expand=True, padx=(0, 10))
@@ -1365,21 +1376,11 @@ class AnonShieldGUI:
         )
         disclaimer_label.pack(side="bottom", pady=(20, 0))
 
-        # RIGHT COLUMN
-        right_frame = ctk.CTkFrame(body_frame, fg_color=BG_MAIN, width=340, corner_radius=0)
-        right_frame.pack(side="right", fill="both", padx=(10, 0))
-        right_frame.pack_propagate(False)
 
-        # Branding
-        branding_label = ctk.CTkLabel(
-            right_frame, text="Created with ❤  by Grouvya!", 
-            text_color="#FF33A1", font=("Helvetica", 12, "bold"), cursor="hand2"
-        )
-        branding_label.pack(side="bottom", pady=(0, 15))
-        branding_label.bind("<Button-1>", lambda e: webbrowser.open("https://guns.lol/grouvya"))
+
 
         actions_card = ctk.CTkFrame(right_frame, fg_color=BG_CARD, corner_radius=8)
-        actions_card.pack(fill="both", expand=True, padx=5, pady=5, ipadx=15, ipady=15)
+        actions_card.pack(fill="x", padx=5, pady=5, ipadx=15, ipady=15)
 
         ctk.CTkLabel(actions_card, text="CONTROL PANEL", text_color=FG_TEXT, font=self.font_label).pack(anchor="w")
         
@@ -1454,6 +1455,14 @@ class AnonShieldGUI:
             tools_frame, "🧅 Host Hidden Service (.onion)", COLOR_ONION, self.on_hidden_service
         )
         self.btn_hidden.pack(fill="x", pady=3)
+
+        # Branding
+        branding_label = ctk.CTkLabel(
+            right_frame, text="Created with ❤  by Grouvya!", 
+            text_color="#FF33A1", font=("Helvetica", 12, "bold"), cursor="hand2"
+        )
+        branding_label.pack(pady=(0, 15))
+        branding_label.bind("<Button-1>", lambda e: webbrowser.open("https://guns.lol/grouvya"))
 
         # CONSOLE
         console_container = ctk.CTkFrame(self.root, fg_color=BG_MAIN, corner_radius=0)
