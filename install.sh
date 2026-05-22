@@ -685,7 +685,7 @@ table inet anonshield {{
         rprint(Panel.fit(
             "[bold green]🛡️  WHO WATCHES WATCHERS? - INITIATING ANONYMITY ENGINE  🛡️[/bold green]\n"
             "[dim]Securing Linux System using the Tor Network[/dim]\n"
-            "[bold magenta]Created with <3 By Grouvya![/bold magenta]",
+            "[bold magenta][link=https://guns.lol/grouvya]Created with ❤  by Grouvya![/link][/bold magenta]",
             border_style="green"
         ))
 
@@ -1326,6 +1326,14 @@ class AnonShieldGUI:
         right_frame.pack(side="right", fill="both", padx=(10, 0))
         right_frame.pack_propagate(False)
 
+        # Branding
+        branding_label = ctk.CTkLabel(
+            right_frame, text="Created with ❤  by Grouvya!", 
+            text_color="#FF33A1", font=("Helvetica", 12, "bold"), cursor="hand2"
+        )
+        branding_label.pack(side="bottom", pady=(0, 15))
+        branding_label.bind("<Button-1>", lambda e: webbrowser.open("https://guns.lol/grouvya"))
+
         actions_card = ctk.CTkFrame(right_frame, fg_color=BG_CARD, corner_radius=8)
         actions_card.pack(fill="both", expand=True, padx=5, pady=5, ipadx=15, ipady=15)
 
@@ -1395,13 +1403,6 @@ class AnonShieldGUI:
             tools_frame, "🧅 Host Hidden Service (.onion)", COLOR_ONION, self.on_hidden_service
         )
         self.btn_hidden.pack(fill="x", pady=3)
-
-        # Branding
-        branding_label = ctk.CTkLabel(
-            actions_card, text="Created with <3 By Grouvya!", 
-            text_color="#FF33A1", font=("Helvetica", 12, "bold")
-        )
-        branding_label.pack(side="bottom", pady=20)
 
         # CONSOLE
         console_container = ctk.CTkFrame(self.root, fg_color=BG_MAIN, corner_radius=0)
