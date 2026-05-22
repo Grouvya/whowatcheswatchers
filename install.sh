@@ -215,6 +215,7 @@ try:
     from rich.live import Live
     from rich.status import Status
     from rich.align import Align
+    from rich.progress import Progress, BarColumn, TextColumn, SpinnerColumn
     from rich import print as rprint
     HAS_RICH = True
 except ImportError:
@@ -696,41 +697,60 @@ table inet anonshield {{
                 console_print(f"[red]Failed to spoof MAC addresses: {e}[/red]")
                 
         # 2. Boot Tor Daemon
-        console_print("[bold cyan]🔄 Verifying Tor service daemon...[/bold cyan]")
-        self.manage_tor_service("start")
+        console_print("[bold cyan]🔄 Restarting Tor service daemon to establish a fresh connection...[/bold cyan]")
+        self.manage_tor_service("restart")
         
         # 3. Wait for Tor circuit bootstrap
-        if HAS_RICH:
-            with Status("[cyan]Waiting for Tor circuit bootstrap (connecting to network)...[/cyan]", console=self.console) as status:
-                success = False
+        is_terminal = hasattr(sys.stdout, 'isatty') and sys.stdout.isatty()
+        
+        success = False
+        if HAS_RICH and is_terminal:
+            with Progress(
+                SpinnerColumn(),
+                TextColumn("[progress.description]{task.description}"),
+                BarColumn(complete_style="green", finished_style="green"),
+                TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+                console=self.console
+            ) as progress_bar:
+                task = progress_bar.add_task("[cyan]Connecting to Tor network...", total=100)
                 for _ in range(30):
                     progress, summary = self.get_tor_bootstrap_status()
-                    status.update(f"[cyan]Tor Bootstrap: [bold]{progress}%[/bold] ({summary})[/cyan]")
+                    progress_bar.update(task, completed=progress, description=f"[cyan]Connecting... ({summary})")
                     if progress == 100:
                         success = True
                         break
                     time.sleep(1)
-                
-                if not success:
-                    status.stop()
-                    console_print("[bold red]✗ Tor service failed to bootstrap within 30 seconds.[/bold red]")
-                    console_print("[yellow]Aborting shield start to prevent locking you out of the internet. Rolling back...[/yellow]")
-                    self.stop_shield()
-                    return
-        else:
+        elif is_terminal:
             print("Waiting for Tor to bootstrap...")
-            success = False
             for _ in range(30):
                 progress, summary = self.get_tor_bootstrap_status()
-                print(f"Tor Bootstrap: {progress}% ({summary})")
+                bar_len = 20
+                filled_len = int(bar_len * progress / 100)
+                bar = '#' * filled_len + '-' * (bar_len - filled_len)
+                sys.stdout.write(f"\r[{bar}] {progress}% ({summary})          ")
+                sys.stdout.flush()
+                if progress == 100:
+                    sys.stdout.write("\n")
+                    success = True
+                    break
+                time.sleep(1)
+        else:
+            # GUI mode or non-interactive, don't spam progress bar to console
+            console_print("[cyan]Waiting for Tor circuit bootstrap (connecting to network)...[/cyan]")
+            for _ in range(30):
+                progress, summary = self.get_tor_bootstrap_status()
                 if progress == 100:
                     success = True
                     break
                 time.sleep(1)
-            if not success:
-                print("Tor bootstrap failed. Rolling back.")
-                self.stop_shield()
-                return
+            if success:
+                console_print("[green]✓ Connected to Tor network successfully![/green]")
+
+        if not success:
+            console_print("[bold red]✗ Tor service failed to bootstrap within 30 seconds.[/bold red]")
+            console_print("[yellow]Aborting shield start to prevent locking you out of the internet. Rolling back...[/yellow]")
+            self.stop_shield()
+            return
 
         # 4. Configure systemd-resolved to use Tor DNS port
         console_print("[bold cyan]🔌 Directing system DNS to Tor secure resolver...[/bold cyan]")
@@ -1259,8 +1279,18 @@ class AnonShieldGUI:
         self.val_ip.grid(row=0, column=1, sticky="w", padx=10, pady=5)
 
         ctk.CTkLabel(details_frame, text="Tor Daemon:", text_color=FG_MUTED, font=self.font_label).grid(row=1, column=0, sticky="w", pady=5)
-        self.val_tor = ctk.CTkLabel(details_frame, text="Checking...", text_color=FG_TEXT, font=self.font_value)
-        self.val_tor.grid(row=1, column=1, sticky="w", padx=10, pady=5)
+        
+        tor_frame = ctk.CTkFrame(details_frame, fg_color="transparent")
+        tor_frame.grid(row=1, column=1, sticky="w", padx=10, pady=5)
+        
+        self.val_tor = ctk.CTkLabel(tor_frame, text="Checking...", text_color=FG_TEXT, font=self.font_value)
+        self.val_tor.pack(side="left")
+        
+        self.tor_progress = ctk.CTkProgressBar(tor_frame, width=100, height=8, progress_color=COLOR_SECURE)
+        self.tor_progress.pack(side="left", padx=(10, 0))
+        self.tor_progress.set(0)
+        self._target_progress = 0.0
+        self.animate_progress()
 
         ctk.CTkLabel(details_frame, text="Kill Switch:", text_color=FG_MUTED, font=self.font_label).grid(row=2, column=0, sticky="w", pady=5)
         self.val_ks = ctk.CTkLabel(details_frame, text="Inactive", text_color=FG_TEXT, font=self.font_value)
@@ -1412,11 +1442,24 @@ class AnonShieldGUI:
     def _poll_loop(self):
         last_ip_check = 0
         cached_tor_status = None
+        is_active = False
+        mac_spoof_active = False
+        rx = 0
+        tx = 0
+        circuits = []
+        
         while True:
-            if not self.action_lock:
-                try:
+            try:
+                # Always update Tor connection progress so the UI progress bar is responsive
+                service_status = "Stopped"
+                res = subprocess.run(["systemctl", "is-active", "tor"], capture_output=True, text=True)
+                if res.stdout.strip() == "active":
+                    service_status = "Running"
+                progress, summary = self.shield.get_tor_bootstrap_status()
+                
+                if not self.action_lock:
                     is_active = self.shield.is_anonshield_active()
-                    
+
                     current_time = time.time()
                     if current_time - last_ip_check > 30:
                         try:
@@ -1424,33 +1467,46 @@ class AnonShieldGUI:
                         except Exception:
                             pass
                         last_ip_check = current_time
-                        
-                    tor_status = cached_tor_status
-                    
-                    service_status = "Stopped"
-                    res = subprocess.run(["systemctl", "is-active", "tor"], capture_output=True, text=True)
-                    if res.stdout.strip() == "active":
-                        service_status = "Running"
-                    progress, summary = self.shield.get_tor_bootstrap_status()
+
                     mac_spoof_active = os.path.exists("/var/lib/anonshield/state.json")
-                    
                     rx = self.shield.bw_stats.get("rx", 0) / 1024
                     tx = self.shield.bw_stats.get("tx", 0) / 1024
-                    
+
                     # Fetch circuits
                     circuits = []
                     if is_active:
                         circuits = self.shield.get_circuits()
 
-                    self.root.after(0, lambda ia=is_active, ts=tor_status, ss=service_status, p=progress, s=summary, msa=mac_spoof_active, r=rx, t=tx, c=circuits: self.update_state_ui(
-                        ia, ts, ss, p, s, msa, r, t, c
-                    ))
-                except Exception as e:
-                    print(f"Poll loop error: {e}")
-            time.sleep(3)
+                tor_status = cached_tor_status
+                self.root.after(0, lambda ia=is_active, ts=tor_status, ss=service_status, p=progress, s=summary, msa=mac_spoof_active, r=rx, t=tx, c=circuits: self.update_state_ui(
+                    ia, ts, ss, p, s, msa, r, t, c
+                ))
+            except Exception as e:
+                print(f"Poll loop error: {e}")
+            time.sleep(1)
 
     def poll_system_state(self):
         threading.Thread(target=self._poll_loop, daemon=True).start()
+
+    def animate_progress(self):
+        try:
+            current = self.tor_progress.get()
+            target = getattr(self, '_target_progress', 0.0)
+            
+            diff = target - current
+            if abs(diff) > 0.001:
+                step = diff * 0.1
+                if step > 0 and step < 0.002: step = 0.002
+                if step < 0 and step > -0.002: step = -0.002
+                
+                new_val = current + step
+                if (step > 0 and new_val > target) or (step < 0 and new_val < target):
+                    new_val = target
+                    
+                self.tor_progress.set(new_val)
+        except Exception:
+            pass
+        self.root.after(20, self.animate_progress)
 
     def update_state_ui(self, is_active, tor_status, service_status, progress, summary, mac_spoof_active, rx, tx, circuits):
         if tor_status and tor_status.get("IsTor") and is_active:
@@ -1467,8 +1523,9 @@ class AnonShieldGUI:
             self.val_ip.configure(text=ip, text_color=COLOR_EXPOSED)
             self.val_ks.configure(text="Inactive", text_color=FG_TEXT)
 
-        tor_desc = f"{service_status} (Bootstrap: {progress}%)"
+        tor_desc = f"{service_status} ({summary})"
         self.val_tor.configure(text=tor_desc)
+        self._target_progress = progress / 100.0
         
         mac_desc = "Active (Spoofed)" if mac_spoof_active else "Default (Hardware MAC)"
         mac_color = COLOR_SECURE if mac_spoof_active else FG_TEXT
