@@ -93,7 +93,7 @@ do_uninstall() {
 
 do_install() {
     # 3. Update & Install Dependencies
-    echo -e "${BOLD}${BLUE}[1/5]${NC} Installing system packages and dependencies..."
+    echo -e "${BOLD}${BLUE}[1/7]${NC} Installing system packages and dependencies..."
 
     if command -v apt-get >/dev/null 2>&1; then
         PM="apt-get"
@@ -121,7 +121,7 @@ do_install() {
 
 
     # 4. Create App Directories
-    echo -e "\n${BOLD}${BLUE}[2/5]${NC} Creating application directories and permissions..."
+    echo -e "\n${BOLD}${BLUE}[2/7]${NC} Creating application directories and permissions..."
     mkdir -p "$APP_DIR"
     
     echo -e "\n  ${BOLD}Installing additional Python packages inside virtual environment...${NC}"
@@ -147,7 +147,7 @@ do_install() {
     echo -e "  ${GREEN}✓${NC} Added user $REAL_USER to 'anonshield-bypass' group."
 
     # 5. Configure Tor Service
-    echo -e "\n${BOLD}${BLUE}[3/5]${NC} Configuring Tor Transparent Proxy and Control Port..."
+    echo -e "\n${BOLD}${BLUE}[3/7]${NC} Configuring Tor Transparent Proxy and Control Port..."
     TORRC="/etc/tor/torrc"
 
     if [ ! -f "$TORRC" ]; then
@@ -180,11 +180,11 @@ EOF
     # Enable and restart Tor to apply changes
     systemctl daemon-reload
     systemctl enable -q tor >/dev/null 2>&1
-    systemctl restart tor
+    systemctl restart tor >/dev/null 2>&1
     echo -e "  ${GREEN}✓${NC} Enabled and restarted Tor service daemon."
 
     # 6. Extract and Install Application Files
-    echo -e "\n${BOLD}${BLUE}[4/5]${NC} Extracting bundled code resources..."
+    echo -e "\n${BOLD}${BLUE}[4/7]${NC} Extracting bundled code resources..."
     
 
 cat << 'EOF_BUNDLE' > "/tmp/anonshield.py"
@@ -602,6 +602,23 @@ table inet anonshield {{
                     controller.reset_conf("ClientTransportPlugin")
                 return True
         except Exception:
+            return False
+
+    def set_custom_bridges(self, bridge_lines):
+        try:
+            with Controller.from_port(port=self.config["tor_control_port"]) as controller:
+                controller.authenticate()
+                if bridge_lines:
+                    controller.set_options({
+                        "UseBridges": "1",
+                        "Bridge": bridge_lines,
+                    })
+                else:
+                    controller.set_options({"UseBridges": "0"})
+                    controller.reset_conf("Bridge")
+                return True
+        except Exception as e:
+            console_print(f"[red]Failed to set custom bridges: {e}[/red]")
             return False
 
     def sandbox_command(self, cmd_args):
@@ -1809,8 +1826,6 @@ if __name__ == "__main__":
     main()
 
 EOF_BUNDLE
-\nEOF_BUNDLE\n
-EOF_BUNDLE
 
 cat << 'EOF_BUNDLE' > "/tmp/anonshield.conf"
 [anonshield]
@@ -1903,7 +1918,7 @@ EOF_WRAP
     rm -f /tmp/anonshield.conf /tmp/anonshield.py /tmp/anonshield_gui.py /tmp/anonshield_icon.png /tmp/com.anonshield.policy
 
     # 7. Create Launchers and Shortcuts
-    echo -e "\n${BOLD}${BLUE}[5/6]${NC} Deploying Application Menu and Desktop launchers..."
+    echo -e "\n${BOLD}${BLUE}[5/7]${NC} Deploying Application Menu and Desktop launchers..."
 
     CAT_MENU="/usr/share/applications/anonshield.desktop"
     cat << EOF > "$CAT_MENU"
