@@ -2244,7 +2244,7 @@ class AnonShieldGUI:
         self.active_onion = None
         self.active_onion_id = None
         
-        self.root.protocol("WM_DELETE_WINDOW", self.hide_window)
+        self.root.protocol("WM_DELETE_WINDOW", self.quit_app)
         
         self.setup_tray_icon()
         self.show_disclaimer_popup()
