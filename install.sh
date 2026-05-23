@@ -1710,8 +1710,23 @@ class FingerprintRandomizer:
                         }
                         return imageData;
                     };
+                    const originalFillText = context.fillText;
+                    context.fillText = function(...args2) {
+                        context.fillStyle = `rgba(${getRandInt(0,5)},${getRandInt(0,5)},${getRandInt(0,5)},${Math.random()})`;
+                        return originalFillText.apply(this, args2);
+                    };
                 }
                 return context;
+            };
+            
+            const originalToDataURL = HTMLCanvasElement.prototype.toDataURL;
+            HTMLCanvasElement.prototype.toDataURL = function(...args) {
+                const ctx = this.getContext('2d');
+                if (ctx) {
+                    ctx.fillStyle = `rgba(${getRandInt(0,5)},${getRandInt(0,5)},${getRandInt(0,5)},${Math.random()})`;
+                    ctx.fillRect(0, 0, 1, 1);
+                }
+                return originalToDataURL.apply(this, args);
             };
 
             // Randomize WebGL
@@ -1725,16 +1740,28 @@ class FingerprintRandomizer:
             };
 
             // Randomize Audio
-            const originalCreateOscillator = BaseAudioContext.prototype.createOscillator;
-            BaseAudioContext.prototype.createOscillator = function() {
-                const osc = originalCreateOscillator.apply(this);
-                const originalStart = osc.start;
-                osc.start = function(...args) {
-                    osc.frequency.value += getRand() * 5;
-                    return originalStart.apply(this, args);
+            if (window.BaseAudioContext) {
+                const originalCreateOscillator = BaseAudioContext.prototype.createOscillator;
+                BaseAudioContext.prototype.createOscillator = function() {
+                    const osc = originalCreateOscillator.apply(this);
+                    const originalStart = osc.start;
+                    osc.start = function(...args) {
+                        osc.frequency.value += getRand() * 5;
+                        return originalStart.apply(this, args);
+                    };
+                    return osc;
                 };
-                return osc;
-            };
+            }
+            if (window.AudioBuffer) {
+                const originalGetChannelData = AudioBuffer.prototype.getChannelData;
+                AudioBuffer.prototype.getChannelData = function(...args) {
+                    const data = originalGetChannelData.apply(this, args);
+                    for (let i = 0; i < data.length; i += 100) {
+                        data[i] += getRand() * 0.0001;
+                    }
+                    return data;
+                };
+            }
             
             // Randomize Screen
             const resolutions = [[1920, 1080], [1366, 768], [1536, 864], [2560, 1440]];
@@ -1764,6 +1791,15 @@ class FingerprintRandomizer:
             Object.defineProperty(navigator, 'language', {get: () => ['en-US', 'en-GB', 'fr-FR', 'de-DE', 'es-ES'][getRandInt(0,4)]});
             Object.defineProperty(navigator, 'languages', {get: () => [navigator.language, 'en']});
             Object.defineProperty(navigator, 'doNotTrack', {get: () => [null, '1', 'unspecified'][getRandInt(0,2)]});
+            
+            // Additional Missing Navigator Properties
+            Object.defineProperty(navigator, 'webdriver', {get: () => false});
+            Object.defineProperty(navigator, 'vendor', {get: () => ['Google Inc.', 'Apple Computer, Inc.', ''][getRandInt(0,2)]});
+            Object.defineProperty(navigator, 'vendorSub', {get: () => ''});
+            Object.defineProperty(navigator, 'product', {get: () => 'Gecko'});
+            Object.defineProperty(navigator, 'productSub', {get: () => '20030107'});
+            Object.defineProperty(navigator, 'buildID', {get: () => '20181001000000'});
+            Object.defineProperty(navigator, 'cookieEnabled', {get: () => true});
             
             // Spoof Timezone
             const timezones = ['UTC', 'America/New_York', 'Europe/London', 'Asia/Tokyo'];
@@ -1832,6 +1868,12 @@ def request(flow: http.HTTPFlow) -> None:
         del flow.request.headers["Accept-Encoding"]
 
 def response(flow: http.HTTPFlow) -> None:
+    # Strip CSP to ensure our injected inline scripts execute
+    if "Content-Security-Policy" in flow.response.headers:
+        del flow.response.headers["Content-Security-Policy"]
+    if "Content-Security-Policy-Report-Only" in flow.response.headers:
+        del flow.response.headers["Content-Security-Policy-Report-Only"]
+
     if flow.response and flow.response.content:
         content_type = flow.response.headers.get("Content-Type", "")
         if "text/html" in content_type:
