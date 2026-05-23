@@ -334,10 +334,10 @@ EOF
     # Configure Tor service to use Clearnet DNS (so Snowflake can resolve broker)
     echo -e "  ${BOLD}Creating systemd DNS override for Tor (Snowflake Support)...${NC}"
     
-    # Resolve Snowflake domains dynamically during install
-    SNOWFLAKE_BROKER_IP=$(getent hosts snowflake-broker.torproject.net.global.prod.fastly.net | awk '{print $1}' | head -n 1)
-    CDN_IP=$(getent hosts cdn.sstatic.net | awk '{print $1}' | head -n 1)
-    STUN_IP=$(getent hosts stun.l.google.com | awk '{print $1}' | head -n 1)
+    # Resolve Snowflake domains dynamically during install (IPv4 ONLY)
+    SNOWFLAKE_BROKER_IP=$(getent ahostsv4 snowflake-broker.torproject.net.global.prod.fastly.net | awk '{print $1}' | head -n 1)
+    CDN_IP=$(getent ahostsv4 cdn.sstatic.net | awk '{print $1}' | head -n 1)
+    STUN_IP=$(getent ahostsv4 stun.l.google.com | awk '{print $1}' | head -n 1)
     
     cp /etc/hosts /etc/tor/hosts
     [ -n "$SNOWFLAKE_BROKER_IP" ] && echo "$SNOWFLAKE_BROKER_IP snowflake-broker.torproject.net.global.prod.fastly.net" >> /etc/tor/hosts
