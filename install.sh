@@ -893,16 +893,15 @@ table inet anonshield {{
             with Controller.from_port(port=self.config["tor_control_port"]) as controller:
                 controller.authenticate()
                 if enable:
-                    controller.set_options({
-                        "UseBridges": "1",
-                        "ClientTransportPlugin": "obfs4 exec /usr/bin/obfs4proxy"
-                    })
+                    # Set options sequentially — Tor can reject a combined SETCONF
+                    # if ClientTransportPlugin is set without a valid Bridge in the same call
+                    controller.set_conf("UseBridges", "1")
+                    controller.set_conf("ClientTransportPlugin", "obfs4 exec /usr/bin/obfs4proxy")
                 else:
-                    # Disable both atomically to avoid leaving Tor in a mixed state
-                    controller.set_options({
-                        "UseBridges": "0",
-                        "ClientTransportPlugin": ""
-                    })
+                    # RESETCONF must be used to clear ClientTransportPlugin;
+                    # Tor rejects an empty string for this option via SETCONF
+                    controller.set_conf("UseBridges", "0")
+                    controller.reset_conf("ClientTransportPlugin")
                 return True
         except Exception:
             return False
@@ -912,15 +911,23 @@ table inet anonshield {{
             with Controller.from_port(port=self.config["tor_control_port"]) as controller:
                 controller.authenticate()
                 if enable:
-                    controller.set_options({
-                        "UseBridges": "1",
-                        "ClientTransportPlugin": "snowflake exec /usr/bin/snowflake-client"
-                    })
+                    # Set UseBridges first, then the transport plugin, then the Bridge
+                    # line — Tor requires all three to be present for Snowflake to work.
+                    # A missing Bridge directive causes an immediate connection drop.
+                    controller.set_conf("UseBridges", "1")
+                    controller.set_conf("ClientTransportPlugin",
+                        "snowflake exec /usr/bin/snowflake-client "
+                        "-url https://snowflake-broker.torproject.net/ "
+                        "-ice stun:stun.l.google.com:19302")
+                    controller.set_conf("Bridge",
+                        "snowflake 192.0.2.3:1 "
+                        "2B280B23E1107BB62ABFC40DDCC8824814F80A72")
                 else:
-                    controller.set_options({
-                        "UseBridges": "0",
-                        "ClientTransportPlugin": ""
-                    })
+                    # RESETCONF must be used to clear ClientTransportPlugin and Bridge;
+                    # Tor rejects an empty string for these options via SETCONF
+                    controller.set_conf("UseBridges", "0")
+                    controller.reset_conf("ClientTransportPlugin")
+                    controller.reset_conf("Bridge")
                 return True
         except Exception:
             return False
@@ -2064,8 +2071,10 @@ class AnonShieldGUI:
         self.loading_window.title(title)
         self.loading_window.geometry("300x150")
         self.loading_window.transient(self.root)
-        self.loading_window.wait_visibility()
-        self.loading_window.grab_set()
+        # NOTE: wait_visibility() was removed — it blocks Tkinter's event loop on the
+        # main thread, preventing the window from ever rendering (deadlock). grab_set()
+        # is now deferred via after() so it runs once the window is actually visible.
+        self.loading_window.after(50, self.loading_window.grab_set)
         
         lbl = ctk.CTkLabel(self.loading_window, text=message, font=("Helvetica", 12))
         lbl.pack(pady=(30, 10))
