@@ -2,7 +2,7 @@
 
 *An advanced, system-wide Anonymity Engine, Transparent Proxy, and Fingerprint Shield designed for extreme privacy.*
 
-**Created with ❤ by Grouvya**
+**Created with ❤ by Grouvya (ofinilet)**
 
 **Who Watches Watchers?** is an all-in-one privacy framework. Unlike standard Tor browsers that only protect web traffic within a single window, this application implements a **system-wide transparent proxy**. It forces 100% of your operating system's network traffic through the Tor network, violently spoofs your hardware footprint, and intercepts tracking APIs to make your machine completely untraceable.
 
@@ -42,7 +42,7 @@ This is the crown jewel of the anonymity engine. The shield deploys an invisible
 ## 🛠️ Installation & Setup
 
 ### Prerequisites
-- A Debian-based Linux distribution (Parrot OS, Kali Linux, Ubuntu, Debian).
+- A Linux distribution supporting `apt`, `pacman`, or `dnf` package managers (e.g., Debian, Ubuntu, Kali, Parrot OS, Arch Linux, Fedora, RHEL).
 - `sudo` privileges (Root access is strictly required to modify kernel parameters and `nftables`).
 
 ### Quick Install
