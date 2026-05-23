@@ -56,8 +56,140 @@ do_uninstall() {
     fi
     rm -f /etc/systemd/system/anonshield.service
     systemctl daemon-reload
-    
-    # 2. Remove directories
+
+    # 2. Restore OS connection and network settings to defaults
+    echo -e "\n  ${BOLD}• Restoring OS connection and network settings...${NC}"
+
+    # 2a. Restore original MAC addresses from saved state.
+    #     This MUST run before $STATE_DIR is deleted below.
+    if [ -f "$STATE_DIR/state.json" ]; then
+        echo -e "    Restoring original hardware MAC addresses..."
+        python3 - <<'PYEOF'
+import json, subprocess, sys
+state_file = "/var/lib/anonshield/state.json"
+try:
+    with open(state_file) as f:
+        state = json.load(f)
+    for iface, orig_mac in state.items():
+        subprocess.run(["ip", "link", "set", "dev", iface, "down"], capture_output=True)
+        res = subprocess.run(["macchanger", "-m", orig_mac, iface],
+                             capture_output=True, text=True)
+        subprocess.run(["ip", "link", "set", "dev", iface, "up"], capture_output=True)
+        if res.returncode == 0:
+            print(f"      ✓ {iface} restored → {orig_mac}")
+        else:
+            print(f"      ⚠ Could not restore MAC for {iface}: {res.stderr.strip()}")
+except Exception as e:
+    print(f"      ⚠ MAC restore failed: {e}", file=sys.stderr)
+PYEOF
+    else
+        echo -e "    ${YELLOW}⚠${NC}  No MAC state file found — MACs were never spoofed or already restored."
+    fi
+
+    # 2b. Flush transparent-proxy nftables table if it is still loaded
+    if nft list table inet anonshield > /dev/null 2>&1; then
+        nft delete table inet anonshield
+        echo -e "    ${GREEN}✓${NC} Removed nftables transparent proxy / kill-switch rules."
+    fi
+
+    # 2c. Re-enable IPv6 (was disabled by sysctl during shield activation)
+    sysctl -w net.ipv6.conf.all.disable_ipv6=0     > /dev/null 2>&1
+    sysctl -w net.ipv6.conf.default.disable_ipv6=0 > /dev/null 2>&1
+    echo -e "    ${GREEN}✓${NC} IPv6 re-enabled."
+
+    # 2d. Restore hostname if it was spoofed to 'amnesic'
+    CURRENT_HOSTNAME=$(hostname 2>/dev/null)
+    if [ "$CURRENT_HOSTNAME" = "amnesic" ]; then
+        # Try to derive the original name from /etc/hosts (127.0.1.1 line that isn't amnesic)
+        ORIG_HOSTNAME=$(awk '/^127\.0\.1\.1/ && $2!="amnesic" {print $2; exit}' /etc/hosts 2>/dev/null)
+        [ -z "$ORIG_HOSTNAME" ] && ORIG_HOSTNAME="localhost"
+        hostnamectl set-hostname "$ORIG_HOSTNAME" 2>/dev/null
+        echo -e "    ${GREEN}✓${NC} Hostname restored to: $ORIG_HOSTNAME"
+    fi
+
+    # 2e. Remove systemd-resolved DNS dropin and restart resolver
+    RESOLVED_DROPIN="/etc/systemd/resolved.conf.d/anonshield.conf"
+    if [ -f "$RESOLVED_DROPIN" ]; then
+        rm -f "$RESOLVED_DROPIN"
+        systemctl restart systemd-resolved > /dev/null 2>&1
+        echo -e "    ${GREEN}✓${NC} System DNS resolver restored (systemd-resolved dropin removed)."
+    fi
+
+    # 2f. Remove kernel hardening sysctl config and reload system defaults
+    SYSCTL_CONF="/etc/sysctl.d/99-anonshield-paranoid.conf"
+    if [ -f "$SYSCTL_CONF" ]; then
+        rm -f "$SYSCTL_CONF"
+        sysctl --system > /dev/null 2>&1
+        echo -e "    ${GREEN}✓${NC} Kernel hardening sysctl removed and defaults reloaded."
+    fi
+
+    # 2g. Remove Tor systemd DNS override (BindReadOnlyPaths for Snowflake clearnet DNS)
+    if [ -d "/etc/systemd/system/tor@default.service.d" ]; then
+        rm -rf /etc/systemd/system/tor@default.service.d
+        rm -f  /etc/tor/resolv.conf
+        rm -f  /etc/tor/hosts
+        echo -e "    ${GREEN}✓${NC} Tor systemd DNS override removed."
+    fi
+
+    # 2h. Stop services that run alongside the shield
+    for SVC in privoxy usbguard; do
+        systemctl stop    "$SVC" > /dev/null 2>&1
+    done
+    # Allow all USB devices again after USBGuard is stopped
+    usbguard allow-device -a > /dev/null 2>&1
+
+    # Kill the dnsmasq instance launched by anonshield (bound to port 5353)
+    pkill -f "dnsmasq.*5353" > /dev/null 2>&1 || true
+
+    # 2i. Stop, disable, and remove all AnonShield-installed background services
+    for SVC in kloak anonshield-decoy anon-htpdate anon-ram-wipe; do
+        if systemctl is-active  --quiet "$SVC" 2>/dev/null; then
+            systemctl stop    "$SVC" > /dev/null 2>&1
+        fi
+        if systemctl is-enabled --quiet "$SVC" 2>/dev/null; then
+            systemctl disable "$SVC" > /dev/null 2>&1
+        fi
+    done
+    rm -f /etc/systemd/system/kloak.service
+    rm -f /etc/systemd/system/anonshield-decoy.service
+    rm -f /etc/systemd/system/anon-htpdate.service
+    rm -f /etc/systemd/system/anon-ram-wipe.service
+    rm -f /usr/local/bin/decoy-traffic.sh
+    rm -f /usr/local/sbin/kloak
+    echo -e "    ${GREEN}✓${NC} AnonShield background services stopped, disabled, and removed."
+
+    # 2j. Disable DNSCrypt-Proxy (was enabled at install; leave package intact)
+    if systemctl is-enabled --quiet dnscrypt-proxy 2>/dev/null; then
+        systemctl disable --now dnscrypt-proxy > /dev/null 2>&1
+        echo -e "    ${GREEN}✓${NC} DNSCrypt-Proxy disabled."
+    fi
+
+    # 2k. Re-enable system time synchronisation (was disabled at install)
+    if systemctl is-enabled --quiet systemd-timesyncd 2>/dev/null || true; then
+        systemctl enable --now systemd-timesyncd > /dev/null 2>&1
+        echo -e "    ${GREEN}✓${NC} System time synchronisation (systemd-timesyncd) re-enabled."
+    fi
+
+    # 2l. Restore swap if AnonShield encrypted it with a single-use key
+    if [ -e "/dev/mapper/cryptswap" ]; then
+        swapoff /dev/mapper/cryptswap > /dev/null 2>&1
+        cryptsetup close cryptswap    > /dev/null 2>&1
+        sed -i '/cryptswap/d' /etc/crypttab
+        swapon -a > /dev/null 2>&1
+        echo -e "    ${GREEN}✓${NC} Swap restored to original configuration."
+    fi
+
+    # 2m. Clean up any leftover sandbox network namespaces
+    for NS in anonsandbox anonvm; do
+        ip netns delete "$NS" > /dev/null 2>&1 || true
+    done
+    ip link delete veth-anon > /dev/null 2>&1 || true
+    ip link delete veth-vm   > /dev/null 2>&1 || true
+
+    systemctl daemon-reload
+    echo -e "  ${GREEN}✓${NC} OS connection settings fully restored to system defaults.\n"
+
+    # 3. Remove directories
     echo -e "  • Removing application files and logs..."
     rm -rf "$APP_DIR"
     rm -rf "$CONF_DIR"
@@ -66,18 +198,18 @@ do_uninstall() {
     rm -f "/usr/local/bin/anonshield-gui"
     rm -f "/usr/share/icons/hicolor/256x256/apps/anonshield.png"
     rm -f "/usr/share/polkit-1/actions/com.anonshield.policy"
-    
-    # 3. Remove Desktop shortcuts
+
+    # 4. Remove Desktop shortcuts
     rm -f "/usr/share/applications/anonshield.desktop"
     rm -f "$REAL_HOME/Desktop/AnonShield.desktop"
-    
-    # 4. Remove bypass group
+
+    # 5. Remove bypass group
     if getent group anonshield-bypass >/dev/null; then
         echo -e "  • Removing 'anonshield-bypass' split-tunneling group..."
         groupdel anonshield-bypass
     fi
-    
-    # 5. Clean torrc
+
+    # 6. Clean torrc
     TORRC="/etc/tor/torrc"
     if [ -f "$TORRC" ] && grep -q "ANONSHIELD CONFIGURATION" "$TORRC"; then
         echo -e "  • Cleaning up Tor configurations in /etc/tor/torrc..."
