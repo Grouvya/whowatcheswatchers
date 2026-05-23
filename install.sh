@@ -336,9 +336,9 @@ EOF
     mkdir -p /etc/systemd/system/tor@default.service.d
     cat << 'EOF' > /etc/systemd/system/tor@default.service.d/anonshield.conf
 [Service]
-BindReadOnlyPaths=/etc/anonshield/resolv.conf:/etc/resolv.conf
+BindReadOnlyPaths=/etc/tor/resolv.conf:/etc/resolv.conf
 EOF
-    echo "nameserver 1.1.1.1" > "$CONF_DIR/resolv.conf"
+    echo "nameserver 1.1.1.1" > /etc/tor/resolv.conf
 
     # Enable and restart Tor to apply changes
     systemctl daemon-reload
