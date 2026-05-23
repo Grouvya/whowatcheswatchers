@@ -606,6 +606,18 @@ CONFIG_PATH = "/etc/anonshield/anonshield.conf"
 DEFAULT_CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "anonshield.conf")
 STATE_FILE = "/var/lib/anonshield/state.json"
 
+def get_real_user(default="root"):
+    user = os.environ.get("SUDO_USER")
+    if user: return user
+    pk_uid = os.environ.get("PKEXEC_UID")
+    if pk_uid:
+        import pwd
+        try:
+            return pwd.getpwuid(int(pk_uid)).pw_name
+        except Exception:
+            pass
+    return default
+
 # Helper for fallback prints if rich is not available
 def console_print(text, style=""):
     if HAS_RICH:
@@ -925,7 +937,7 @@ table inet anonshield {{
 
     def send_notification(self, title, message):
         # Use DBUS_SESSION_BUS_ADDRESS so notify-send works under sudo/pkexec
-        user = os.environ.get("SUDO_USER")
+        user = get_real_user(default=None)
         env = os.environ.copy()
         if user:
             try:
@@ -1141,7 +1153,7 @@ table inet anonshield {{
             return
             
         ns_name = "anonsandbox"
-        user = os.environ.get("SUDO_USER", "root")
+        user = get_real_user()
         
         console_print(f"[bold cyan]📦 Starting isolated sandbox for: {' '.join(cmd_args)}[/bold cyan]")
         
@@ -1222,7 +1234,7 @@ table inet anonshield {{
             console_print("[bold red]Group 'anonshield-bypass' does not exist. Please re-run install.sh.[/bold red]")
             return
             
-        user = os.environ.get("SUDO_USER", "root")
+        user = get_real_user()
         console_print(f"[bold cyan]🔓 Launching '{' '.join(cmd_args)}' bypassing Tor (Clearnet)[/bold cyan]")
         try:
             import shlex
@@ -1949,15 +1961,21 @@ def response(flow: http.HTTPFlow) -> None:
             f.write(str(proc.pid))
         
         # Copy the dynamically generated CA to system trust store so browsers accept the proxy
-        time.sleep(2) # Give mitmproxy time to generate certs
+        for _ in range(10):
+            if os.path.exists(os.path.join(self.cert_dir, "mitmproxy-ca-cert.cer")):
+                break
+            time.sleep(1)
+            
         ca_cert = os.path.join(self.cert_dir, "mitmproxy-ca-cert.cer")
         if os.path.exists(ca_cert):
-            subprocess.run(["cp", ca_cert, "/usr/local/share/ca-certificates/anonshield-mitm.crt"], check=False)
+            sys_cert = "/usr/local/share/ca-certificates/anonshield-mitm.crt"
+            subprocess.run(["cp", ca_cert, sys_cert], check=False)
+            subprocess.run(["chmod", "644", sys_cert], check=False)
             subprocess.run(["update-ca-certificates", "--fresh"], check=False)
             
             # Inject into Firefox/Chrome NSS DBs for local user (if certutil is installed)
             if subprocess.run(["which", "certutil"], capture_output=True).returncode == 0:
-                user = os.environ.get("SUDO_USER", "root")
+                user = get_real_user()
                 home = os.path.expanduser(f"~{user}")
                 
                 # Firefox (Native, Snap, Flatpak)
@@ -1971,7 +1989,7 @@ def response(flow: http.HTTPFlow) -> None:
                         for d in os.listdir(ff_dir):
                             if ".default" in d:
                                 db_path = os.path.join(ff_dir, d)
-                                subprocess.run(["certutil", "-A", "-n", "AnonShield-MITM", "-t", "TCu,Cuw,Tuw", "-i", ca_cert, "-d", f"sql:{db_path}"], check=False)
+                                subprocess.run(["sudo", "-u", user, "certutil", "-A", "-n", "AnonShield-MITM", "-t", "TCu,Cuw,Tuw", "-i", sys_cert, "-d", f"sql:{db_path}"], check=False)
                 
                 # Chrome/Chromium/Brave (Native, Snap, Flatpak)
                 pki_dirs = [
@@ -1981,9 +1999,19 @@ def response(flow: http.HTTPFlow) -> None:
                     os.path.join(home, ".var/app/com.brave.Browser/config/.pki/nssdb"),
                     os.path.join(home, ".var/app/org.chromium.Chromium/config/.pki/nssdb")
                 ]
+                
+                # Fix permissions in case a previous run corrupted them as root
+                subprocess.run(["chown", "-R", f"{user}:{user}", os.path.join(home, ".pki")], check=False)
+                subprocess.run(["chown", "-R", f"{user}:{user}", os.path.join(home, ".mozilla")], check=False)
+                
                 for pki_dir in pki_dirs:
+                    if not os.path.isdir(pki_dir) and "snap" not in pki_dir and ".var" not in pki_dir:
+                        os.makedirs(pki_dir, exist_ok=True)
+                        subprocess.run(["chown", "-R", f"{user}:{user}", os.path.join(home, ".pki")], check=False)
+                        subprocess.run(["sudo", "-u", user, "certutil", "-d", f"sql:{pki_dir}", "-N", "--empty-password"], check=False)
+                        
                     if os.path.isdir(pki_dir):
-                        subprocess.run(["certutil", "-A", "-n", "AnonShield-MITM", "-t", "TCu,Cuw,Tuw", "-i", ca_cert, "-d", f"sql:{pki_dir}"], check=False)
+                        subprocess.run(["sudo", "-u", user, "certutil", "-A", "-n", "AnonShield-MITM", "-t", "TCu,Cuw,Tuw", "-i", sys_cert, "-d", f"sql:{pki_dir}"], check=False)
 
     def stop(self):
         if self.is_running():
@@ -2115,7 +2143,7 @@ ctk.set_default_color_theme("blue")
 
 # Ensure we can import from the directory
 sys.path.insert(0, "/opt/anonshield")
-from anonshield import AnonShield, FingerprintRandomizer
+from anonshield import AnonShield, FingerprintRandomizer, get_real_user
 
 # Styling Constants (Modern Flat Dark Theme)
 BG_MAIN = "#121214"
@@ -2132,9 +2160,16 @@ COLOR_ONION = "#A855F7"
 COLOR_WARN = "#F59E0B"
 
 def open_url_safely(url):
-    user = os.environ.get("SUDO_USER")
+    user = get_real_user(default=None)
     if user:
-        subprocess.run(["sudo", "-u", user, "xdg-open", url], check=False)
+        env_vars = []
+        for var in ["DISPLAY", "XAUTHORITY", "DBUS_SESSION_BUS_ADDRESS", "WAYLAND_DISPLAY", "XDG_RUNTIME_DIR", "XDG_SESSION_TYPE"]:
+            val = os.environ.get(var)
+            if val:
+                env_vars.append(f"{var}={val}")
+        
+        cmd = ["sudo", "-u", user, "env"] + env_vars + ["xdg-open", url]
+        subprocess.run(cmd, check=False)
     else:
         webbrowser.open(url)
 
@@ -2910,7 +2945,7 @@ class AnonShieldGUI:
         ctk.CTkLabel(dialog, text="Select an application to launch on the Clearnet:", font=("Helvetica", 14, "bold")).pack(pady=(15, 10), padx=20, anchor="w")
         
         apps = {}
-        real_user = os.environ.get("SUDO_USER", "root")
+        real_user = get_real_user()
         try:
             import pwd as _pwd
             real_home = _pwd.getpwnam(real_user).pw_dir
