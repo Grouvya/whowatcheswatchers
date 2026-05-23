@@ -1,114 +1,88 @@
-# 🛡️ Who Watches Watchers? (AnonShield)
+# Who Watches Watchers? (AnonShield)
 
-**Who Watches Watchers?** (also referred to as *AnonShield*) is an advanced, automated anonymity and privacy-enhancing framework for Linux systems. It acts as a transparent proxy, securely routing all operating system traffic through the Tor network, while seamlessly offering multiple layers of security to thwart tracking, telemetry, and fingerprinting.
+Who Watches Watchers? (AnonShield) is an advanced, system-wide Tor anonymizer GUI and security hardening suite for Linux. It completely locks down your system's network connections, routing everything securely through the Tor network while deploying multiple layers of anti-forensic countermeasures.
 
----
+## 🛡️ Functionalities and Capabilities
 
-## ✨ Key Features
+The suite comes packed with advanced privacy, security, and anti-forensic features:
 
-1. **Transparent Tor Proxying:** All system TCP traffic is transparently routed through the Tor network. DNS requests are securely resolved via Tor's DNS port, preventing DNS leaks. IPv6 is forcefully disabled to prevent Deanonymization leaks.
-2. **🎭 Fingerprint Shield (System-Wide JS Interceptor):** A built-in Man-in-the-Middle (MITM) proxy seamlessly intercepts HTTP/HTTPS traffic and injects anti-tracking JavaScript into every webpage. This completely masks your browser footprint (Canvas, WebGL, Audio Context, Screen Resolution, User-Agent, and Timezone) for *any* browser on the system.
-3. **📦 Ephemeral microVM Sandbox:** Run untrusted applications or malware inside a lightweight, highly restrictive QEMU-based Alpine Linux microVM. The VM is ephemeral (wiped on exit) and routed exclusively through Tor.
-4. **🔓 Split Tunneling (Bypass Tor):** Sometimes you need to access clear-net services (like local banking or services that block Tor). The Split Tunnel feature allows you to launch specific applications outside the Tor network securely.
-5. **🔄 Automatic MAC Address Spoofing:** Spoofs the MAC addresses of your network interfaces upon connection and supports automatic periodic rotation to prevent physical tracking across networks.
-6. **🔒 System Hardening & Security:**
-   - **Kill Switch:** Immediately cuts off all network connectivity if the Tor daemon crashes.
-   - **DNS Blackholing:** Blocks telemetry, ads, and known tracking domains at the system DNS level.
-   - **Single-Use Encrypted Swap:** Re-encrypts your swap partition with a one-time random AES key on startup.
-   - **USBGuard:** Blocks rogue USB devices (BadUSB attacks) while the shield is active.
-
----
-
-## 🚀 Installation
-
-The application comes bundled into a single installation script. It supports Debian/Ubuntu (`apt`), Fedora (`dnf`), and Arch Linux (`pacman`).
-
-```bash
-# Clone the repository or download install.sh
-chmod +x install.sh
-
-# Run the installer with root privileges
-sudo ./install.sh
-```
-
-The script will:
-- Install all necessary dependencies (Tor, QEMU, mitmproxy, nftables, etc.).
-- Set up a dedicated Python virtual environment.
-- Create Desktop shortcuts and GUI launchers.
-- Generate the microVM Alpine ISO.
+* **System-Wide Tor Routing:** Forces all system network traffic through Tor transparently using `nftables`.
+* **Fingerprint Shield (MITM Proxy):** Uses `mitmproxy` to intercept secure web traffic and strip tracking headers to obfuscate your unique browser fingerprint.
+* **Keystroke Biometric Scrambling:** Integrates `kloak` to randomize the timing of your keystrokes, defeating stylometry and behavioral identification.
+* **Cryptographic RAM Wiping:** Uses `sdmem` to securely overwrite your system RAM during shutdown to prevent cold-boot attacks.
+* **Single-Use Swap Encryption:** Automatically encrypts your swap space using a single-use key to prevent data recovery.
+* **MAC Address Spoofing:** Randomizes your network interface MAC addresses on activation using `macchanger` and restores them upon deactivation.
+* **Hostname Spoofing:** Temporarily changes your computer's hostname to `amnesic` while active.
+* **Extreme Kernel Hardening:** Deploys aggressive `sysctl` rules to restrict kernel pointers (`kptr_restrict`), kernel logs (`dmesg_restrict`), `ptrace` scope, and unprivileged BPF.
+* **Secure DNS & NTP:** Routes your system time synchronization (NTP) over Tor using `htpdate`, and secures your DNS requests via Tor and `dnscrypt-proxy`.
+* **IPv6 Disablement:** Prevents IP leaks by completely disabling IPv6.
+* **Ephemeral microVM Sandbox:** A built-in graphical QEMU microVM running Alpine Linux for completely isolated tasks.
 
 ---
 
-## 💻 Usage
+## 📦 Ephemeral microVM Sandbox
 
-You can control *Who Watches Watchers?* using either the graphical interface (GUI) or the command-line interface (CLI).
+AnonShield includes a built-in isolated micro-Virtual Machine (microVM) running Alpine Linux. This allows you to open potentially dangerous files or browse securely in an environment that is completely wiped the moment it is closed.
 
-### 🖥️ Graphical User Interface (GUI)
-Simply search for **AnonShield** in your application menu, or double-click the **AnonShield** icon on your Desktop. 
-The GUI provides easy toggles to:
-- Start/Stop the Anonymity Engine
-- Request a New Identity (Rotate Tor IP)
-- Enable/Disable the **Fingerprint Shield**
-- Launch an application bypassing Tor
-- Launch the Ephemeral microVM
+* **Default Login User:** `root`
+* **Default Password:** *(none, just press Enter)*
 
-### ⌨️ Command Line Interface (CLI)
-You can interact with the daemon directly from the terminal. Note: Most commands require `sudo`.
-
-```bash
-# Start the Anonymity Engine (Transparent Proxy)
-sudo anonshield start
-
-# Stop the Anonymity Engine and restore default settings
-sudo anonshield stop
-
-# Check current connection status and public IP
-anonshield status
-
-# Request a new Tor circuit (New IP)
-sudo anonshield newid
-```
-
-### 🎭 Fingerprint Shield
-The Fingerprint Shield randomizes your digital footprint.
-```bash
-sudo anonshield fingerprint start
-sudo anonshield fingerprint stop
-anonshield fingerprint status
-```
-
-### 📦 Sandbox & Bypass
-```bash
-# Launch a command inside the ephemeral microVM
-sudo anonshield sandbox <command>
-
-# Launch a command completely bypassing Tor (Clear-net)
-sudo anonshield bypass <command>
-```
-
-### 🔄 MAC Spoofing
-```bash
-# Randomize a specific interface
-sudo anonshield mac wlan0 random
-
-# Restore permanent MAC address
-sudo anonshield mac wlan0 reset
-```
+*Note: The microVM sandbox routes all of its traffic through the host's Tor connection automatically.*
 
 ---
 
-## 🛑 Uninstallation
+## 🚀 Walkthrough
 
-If you wish to completely remove the application and restore all system configurations:
-
+### 1. Activating the Shield
+To open the AnonShield Graphical Interface, run the following command in any terminal:
 ```bash
-sudo ./install.sh uninstall
+pkexec anonshield-gui
 ```
+From the GUI, you can click **"Activate Shield"** to lock down the system. The GUI will guide you through the process, setting up Tor routing and applying all security measures.
 
-This will automatically flush all firewall rules, stop all proxies, delete certificates, remove system groups, and clean up the application directories.
+### 2. Using the microVM
+Once the shield is active, you can launch the isolated Alpine Linux environment directly from the GUI by clicking **"Launch microVM Sandbox"**.
 
 ---
 
-## ⚠️ Legal Disclaimer
+## ⚠️ Important: Brave Browser & "HSTS" Errors
 
-*Who Watches Watchers?* is developed solely for educational and privacy-enhancing purposes. The developers hold no responsibility for any misuse, illegal activities, or damages caused by the use of this software. Always comply with the laws of your jurisdiction.
+Because AnonShield includes a **"Fingerprint Shield"** that scrubs your traffic, you might encounter a security error in browsers like **Brave** or **Chrome** when visiting secure websites (like `github.com`). The error will say:
+
+> "The website sent back unusual and incorrect credentials... You cannot visit github.com right now because the website uses HSTS."
+
+### Why this happens:
+To scrub identifying information from secure (HTTPS) websites, AnonShield's `mitmproxy` has to generate a custom "Man-in-the-Middle" security certificate and install it on your system. Because `github.com` strictly enforces HSTS (HTTP Strict Transport Security), Brave detects this custom certificate as an unrecognized interception and blocks the connection.
+
+### How to fix it:
+1. **Restart your browser:** If Brave was already running when you activated the shield, it hasn't loaded the newly injected certificates yet. Fully close Brave and open it again.
+2. **Manually import the certificate:** Modern Chromium browsers sometimes ignore local Linux system certificates. You can manually tell Brave to trust AnonShield's proxy:
+   * Open Brave and navigate to: `brave://settings/certificates`
+   * Click on the **Authorities** tab.
+   * Click **Import**.
+   * Navigate to `/usr/local/share/ca-certificates/` and select the `anonshield-mitm.crt` file.
+   * Check the boxes to trust the certificate for identifying websites, and click **OK**.
+
+---
+
+## ⚙️ Installation Instructions
+
+To install the application and all of its dependencies, simply run the setup script with root privileges:
+
+```bash
+sudo ./install.sh --install
+```
+*(Alternatively, running `sudo ./install.sh` without arguments will default to installing it).*
+
+The script will handle installing required packages, generating the python virtual environment, downloading the microVM ISO, and compiling necessary tools like `kloak`.
+
+---
+
+## 🗑️ Uninstallation Instructions
+
+To completely remove AnonShield, stop all its background services, restore your MAC addresses, and clean up all application data, run:
+
+```bash
+sudo ./install.sh --uninstall
+```
+This will completely revert your system's network routing, firewall rules, and DNS resolution back to their original defaults.
