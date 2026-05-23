@@ -99,13 +99,13 @@ do_install() {
         PM="apt-get"
         export DEBIAN_FRONTEND=noninteractive
         apt-get update -qq
-        apt-get install -y -qq tor macchanger nftables python3-rich python3-tk polkitd python3-pip python3-venv python3-stem obfs4proxy libnotify-bin gir1.2-ayatanaappindicator3-0.1 libayatana-appindicator3-1 bubblewrap privoxy snowflake-client usbguard faketime apparmor-utils dnsmasq curl qemu-system-x86 > /dev/null
+        apt-get install -y -qq tor macchanger nftables python3-rich python3-tk polkitd python3-pip python3-venv python3-stem obfs4proxy libnotify-bin gir1.2-ayatanaappindicator3-0.1 libayatana-appindicator3-1 bubblewrap privoxy snowflake-client usbguard faketime apparmor-utils dnsmasq curl qemu-system-x86 i2pd gcc make git cryptsetup ecryptfs-utils > /dev/null
     elif command -v dnf >/dev/null 2>&1; then
         PM="dnf"
-        dnf install -y -q tor macchanger nftables python3-rich python3-tkinter polkit pip python3-stem obfs4 libnotify libappindicator-gtk3 bubblewrap privoxy snowflake usbguard faketime apparmor-utils dnsmasq curl qemu-system-x86 > /dev/null
+        dnf install -y -q tor macchanger nftables python3-rich python3-tkinter polkit pip python3-stem obfs4 libnotify libappindicator-gtk3 bubblewrap privoxy snowflake usbguard faketime apparmor-utils dnsmasq curl qemu-system-x86 i2pd gcc make git cryptsetup ecryptfs-utils > /dev/null
     elif command -v pacman >/dev/null 2>&1; then
         PM="pacman"
-        pacman -Sy --noconfirm --needed tor macchanger nftables python-rich tk python-pip python-stem obfs4proxy libnotify libappindicator-gtk3 bubblewrap privoxy snowflake usbguard faketime apparmor-utils dnsmasq curl qemu > /dev/null
+        pacman -Sy --noconfirm --needed tor macchanger nftables python-rich tk python-pip python-stem obfs4proxy libnotify libappindicator-gtk3 bubblewrap privoxy snowflake usbguard faketime apparmor-utils dnsmasq curl qemu i2pd gcc make git cryptsetup ecryptfs-utils > /dev/null
     else
         echo -e "${RED}✗${NC} Unsupported package manager. Please install dependencies manually."
         exit 1
@@ -144,6 +144,40 @@ do_install() {
     if [ ! -f "/opt/anonshield/sandbox.iso" ]; then
         curl -sL "https://dl-cdn.alpinelinux.org/alpine/v3.20/releases/x86_64/alpine-virt-3.20.1-x86_64.iso" -o "/opt/anonshield/sandbox.iso"
     fi
+
+    # Compile kloak
+    echo -e "  ${BOLD}Compiling kloak for Keystroke Biometric Scrambling...${NC}"
+    if [ ! -f "/usr/local/sbin/kloak" ]; then
+        git clone https://github.com/vmonaco/kloak.git /tmp/kloak > /dev/null 2>&1
+        cd /tmp/kloak && make > /dev/null 2>&1 && cp kloak /usr/local/sbin/ && cd - > /dev/null
+        rm -rf /tmp/kloak
+    fi
+    cat << 'EOF' > /etc/systemd/system/kloak.service
+[Unit]
+Description=Keystroke Anonymization Tool
+After=syslog.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/sbin/kloak
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    systemctl daemon-reload
+    systemctl enable --now kloak > /dev/null 2>&1
+    
+    # Extreme sysctl kernel hardening
+    echo -e "  ${BOLD}Applying Aggressive Kernel Hardening (sysctl)...${NC}"
+    cat << 'EOF' > /etc/sysctl.d/99-anonshield-paranoid.conf
+kernel.yama.ptrace_scope=3
+kernel.kptr_restrict=2
+kernel.dmesg_restrict=1
+kernel.unprivileged_bpf_disabled=1
+net.ipv4.tcp_timestamps=0
+EOF
+    sysctl --system > /dev/null 2>&1
     echo -e "  ${GREEN}✓${NC} Created $APP_DIR, $CONF_DIR, and secure state directory."
 
     # Create basic Privoxy config
@@ -199,6 +233,7 @@ AutomapHostsOnResolve 1
 TransPort 9040 IsolateDestAddr IsolateDestPort
 DNSPort 9053 IsolateDestAddr IsolateDestPort
 SOCKSPort 9050 IsolateDestAddr IsolateDestPort
+Socks5Proxy 127.0.0.1:4447
 ControlPort 9051
 ConnectionPadding 1
 ReducedConnectionPadding 0
@@ -389,6 +424,20 @@ class AnonShield:
             
             # Spoof MAC using macchanger (Smart blending with known vendors)
             subprocess.run(["macchanger", "-a", iface], capture_output=True, text=True, check=False)
+            
+            # Raw PCIe Bus Reset for Network Cards
+            try:
+                pci_path = os.readlink(f"/sys/class/net/{iface}/device")
+                pci_id = os.path.basename(pci_path)
+                console_print(f"    [yellow]Performing Raw PCIe Bus Reset on {pci_id}...[/yellow]")
+                with open(f"/sys/bus/pci/devices/{pci_id}/remove", "w") as f:
+                    f.write("1")
+                time.sleep(1)
+                with open("/sys/bus/pci/rescan", "w") as f:
+                    f.write("1")
+                time.sleep(2)
+            except Exception:
+                pass
             
             # Enable interface
             subprocess.run(["ip", "link", "set", "dev", iface, "up"], capture_output=True, check=False)
@@ -968,6 +1017,23 @@ table inet anonshield {{
             console_print("[green]✓ DNS Blackholing active (Telemetry/Ads blocked).[/green]")
         except Exception as e:
             console_print(f"[yellow]⚠️ Failed to start dnsmasq: {e}[/yellow]")
+
+        # 2.8 Single-Use Encrypted Swap
+        try:
+            swap_out = subprocess.run(["swapon", "--show=NAME", "--noheadings"], capture_output=True, text=True)
+            swap_devs = swap_out.stdout.strip().split('\n')
+            if swap_devs and swap_devs[0]:
+                dev = swap_devs[0]
+                if "cryptswap" not in dev:
+                    console_print(f"[cyan]🔒 Securing Swap Partition ({dev}) with Single-Use Encryption...[/cyan]")
+                    subprocess.run(["swapoff", "-a"], check=False)
+                    os.system(f"echo 'cryptswap {dev} /dev/urandom swap,cipher=aes-xts-plain64,size=256' > /etc/crypttab")
+                    subprocess.run(["cryptsetup", "plainOpen", "--key-file", "/dev/urandom", dev, "cryptswap"], check=False)
+                    subprocess.run(["mkswap", "/dev/mapper/cryptswap"], check=False)
+                    subprocess.run(["swapon", "/dev/mapper/cryptswap"], check=False)
+                    console_print("[green]✓ Swap is now encrypted with a single-use key.[/green]")
+        except Exception as e:
+            console_print(f"[yellow]⚠️ Failed to secure swap: {e}[/yellow]")
 
         # 3. Wait for Tor circuit bootstrap
         is_terminal = hasattr(sys.stdout, 'isatty') and sys.stdout.isatty()

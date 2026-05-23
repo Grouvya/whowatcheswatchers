@@ -50,6 +50,10 @@ Designed for journalists, whistleblowers, and privacy advocates operating in hig
 
 3. **Using the Sandbox:**
    To use the microVM Sandbox, launch the GUI, ensure the shield is active, and click **"Launch microVM Sandbox"**.
+   - When the QEMU window opens and the Alpine Linux boot finishes, you will be prompted to log in.
+   - **Username:** `root`
+   - **Password:** *(Leave blank and press Enter)*
+   - Any changes made inside the microVM are ephemeral and will be destroyed completely when you close the window.
 
 ---
 
