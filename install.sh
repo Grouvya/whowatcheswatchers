@@ -243,7 +243,47 @@ split-large-forms 0
 keep-alive-timeout 5
 tolerate-pipelining 1
 socket-timeout 300
+hide-user-agent Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36
+hide-accept-language en-US,en;q=0.5
+hide-referer forge
+keep-alive-timeout 5
+tolerate-pipelining 1
+socket-timeout 300
+hide-user-agent Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36
+hide-accept-language en-US,en;q=0.5
+hide-referer forge
+hide-from-header block
 EOF
+
+    # Configure Decoy Traffic Generator
+    echo -e "  ${BOLD}Creating Decoy Traffic Generator...${NC}"
+    cat << 'EOF' > /usr/local/bin/decoy-traffic.sh
+#!/bin/bash
+while true; do
+  SITES=("https://en.wikipedia.org" "https://weather.com" "https://www.bbc.com" "https://www.ubuntu.com" "https://archive.org")
+  SITE=${SITES[$RANDOM % ${#SITES[@]}]}
+  curl -s -x socks5h://127.0.0.1:9050 $SITE > /dev/null
+  sleep $((RANDOM % 60 + 60))
+done
+EOF
+    chmod +x /usr/local/bin/decoy-traffic.sh
+
+    cat << 'EOF' > /etc/systemd/system/anonshield-decoy.service
+[Unit]
+Description=AnonShield Decoy Traffic Generator
+After=tor.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/decoy-traffic.sh
+Restart=always
+User=debian-tor
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    systemctl daemon-reload
+    systemctl enable anonshield-decoy.service > /dev/null 2>&1
 
     # 4.5 Create Bypass Group for Split Tunneling
     if ! getent group anonshield-bypass >/dev/null; then
@@ -284,6 +324,9 @@ ConnectionPadding 1
 ReducedConnectionPadding 0
 CircuitBuildTimeout 10
 CookieAuthentication 1
+UseBridges 1
+ClientTransportPlugin snowflake exec /usr/bin/snowflake-client -url https://snowflake-broker.torproject.net.global.prod.fastly.net/ -front cdn.sstatic.net -ice stun:stun.l.google.com:19302,stun:stun.voip.blackberry.com:3478,stun:stun.altar.com.pl:3478,stun:stun.antisip.com:3478,stun:stun.bluesip.net:3478,stun:stun.dus.net:3478,stun:stun.epygi.com:3478,stun:stun.sonetel.com:3478,stun:stun.sonetel.net:3478,stun:stun.stunprotocol.org:3478,stun:stun.uls.co.za:3478,stun:stun.voipgate.com:3478,stun:stun.voys.nl:3478
+Bridge snowflake 192.0.2.3:1 2B280B23E1107BB62ABFC40DDCC8824814F80A72
 # --- END ANONSHIELD CONFIGURATION ---
 EOF
     echo -e "  ${GREEN}✓${NC} Configured transparent port, DNS, and control ports in /etc/tor/torrc"
@@ -1942,6 +1985,11 @@ class AnonShieldGUI:
         )
         self.btn_microvm.pack(fill="x", pady=3)
 
+        self.btn_amiunique = self.create_flat_button(
+            tools_frame, "🔍 Check Browser Fingerprint", "#8B5CF6", self.on_amiunique
+        )
+        self.btn_amiunique.pack(fill="x", pady=3)
+
         # Branding
         branding_label = ctk.CTkLabel(
             right_frame, text="Created with ❤  by Grouvya!", 
@@ -2151,6 +2199,10 @@ class AnonShieldGUI:
             return
             
         self.show_split_tunnel_dialog()
+
+    def on_amiunique(self):
+        print("\n[Info]: Opening Browser Fingerprint Check...")
+        webbrowser.open("https://amiunique.org/fingerprint")
 
     def on_microvm(self):
         if not self.shield.is_anonshield_active():
