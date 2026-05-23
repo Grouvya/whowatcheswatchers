@@ -497,19 +497,10 @@ EOF
     # Configure Tor service to use Clearnet DNS (so Snowflake can resolve broker)
     echo -e "  ${BOLD}Creating systemd DNS override for Tor (Snowflake Support)...${NC}"
     
-    # Resolve Snowflake domains dynamically during install (IPv4 ONLY)
-    SNOWFLAKE_BROKER_IP=$(getent ahostsv4 snowflake-broker.torproject.net | awk '{print $1}' | head -n 1)
-    STUN_IP=$(getent ahostsv4 stun.l.google.com | awk '{print $1}' | head -n 1)
-    
-    cp /etc/hosts /etc/tor/hosts
-    [ -n "$SNOWFLAKE_BROKER_IP" ] && echo "$SNOWFLAKE_BROKER_IP snowflake-broker.torproject.net" >> /etc/tor/hosts
-    [ -n "$STUN_IP" ] && echo "$STUN_IP stun.l.google.com" >> /etc/tor/hosts
-
     mkdir -p /etc/systemd/system/tor@default.service.d
     cat << 'EOF' > /etc/systemd/system/tor@default.service.d/anonshield.conf
 [Service]
 BindReadOnlyPaths=/etc/tor/resolv.conf:/etc/resolv.conf
-BindReadOnlyPaths=/etc/tor/hosts:/etc/hosts
 EOF
     echo "nameserver 1.1.1.1" > /etc/tor/resolv.conf
 
@@ -2620,6 +2611,9 @@ class AnonShieldGUI:
     def _poll_loop(self):
         last_ip_check = 0
         last_circuit_check = 0
+        last_bootstrap_check = 0
+        cached_progress = 0
+        cached_summary = "Initializing"
         cached_tor_status = None
         is_active = False
         mac_spoof_active = False
@@ -2634,7 +2628,14 @@ class AnonShieldGUI:
                 res = subprocess.run(["systemctl", "is-active", "tor"], capture_output=True, text=True)
                 if res.stdout.strip() == "active":
                     service_status = "Running"
-                progress, summary = self.shield.get_tor_bootstrap_status()
+                
+                current_time = time.time()
+                # Only check bootstrap status if not at 100%, or every 10 seconds to save Tor control connections
+                if cached_progress < 100 or current_time - last_bootstrap_check > 10:
+                    cached_progress, cached_summary = self.shield.get_tor_bootstrap_status()
+                    last_bootstrap_check = current_time
+                    
+                progress, summary = cached_progress, cached_summary
                 
                 if not self._action_running:
                     is_active = self.shield.is_anonshield_active()
