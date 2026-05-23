@@ -1,84 +1,63 @@
-# 🛡️ Who Watches Watchers?
+# Who Watches Watchers? 🛡️
 
-**Who Watches Watchers?** is a premium, automated transparent proxy and state-of-the-art anonymity system for Linux. It routes all system traffic through the Tor network and provides an arsenal of paranoia-level network defenses, physical security lock-downs, and anti-forensic tools, all wrapped in a sleek GUI and CLI.
+**Who Watches Watchers?** is a state-of-the-art, system-wide, fail-closed Transparent Tor Anonymizer for Linux. It aggressively reroutes all network traffic originating from your machine through the Tor network while blocking leaks natively at the firewall level.
 
-## ✨ Extreme Anonymity Features
+Designed for journalists, whistleblowers, and privacy advocates operating in high-risk environments, this tool features an array of deep-cover operational security functions seamlessly controlled via a sleek graphical interface.
 
-### 📡 Network Defense
-- **Transparent Tor Proxying:** All system traffic (TCP/DNS) is automatically forced through Tor using strict `nftables` firewall rules.
-- **Protocol Scrubbing (Privoxy):** Seamlessly strips application-level HTTP/HTTPS tracking headers and cookies before traffic even hits the Tor network.
-- **DNS Leak Prevention:** Forwards standard port 53 DNS to Tor, and actively **blocks** outgoing DoT (Port 853) to prevent rogue apps from bypassing the proxy.
-- **IPv6 Disabling:** Aggressively disables IPv6 at the kernel level (`sysctl`) when the shield is active to prevent subtle routing leaks.
-- **Traffic Padding:** Continuously generates Tor dummy packets to destroy Website Traffic Fingerprinting attempts by deep-packet inspection.
+---
 
-### 🛑 Anti-Forensics & System Lockdown
-- **Emergency Panic Mode:** A dedicated button that instantly drops all network traffic, terminates the proxy, drops system RAM caches (to defeat cold-boot memory forensics), and shreds your original MAC address state files.
-- **Physical Lockdown (`USBGuard`):** Automatically whitelists currently connected devices and **blocks all new USB devices** when the shield is active, thwarting physical BadUSB or hardware keylogger attacks.
-- **Mandatory Access Control (`AppArmor`):** Enforces a dynamically generated, strict AppArmor profile to physically prevent the anonymizer backend from accessing unauthorized files.
-- **System Kill Switch:** Monitors the Tor daemon and drops all packets instantly if the connection is lost.
+## 🌟 Key Features
 
-### 🎭 Hardware & Identity Spoofing
-- **MAC Spoofing & Rotation:** Automatically changes your hardware MAC address on startup and can seamlessly rotate it in the background every 15 minutes.
-- **Hostname Spoofing:** Temporarily rewrites your machine's hostname to `amnesic` to prevent local network leaks.
-- **Strict Isolated Sandbox (`bwrap`):** Launch sensitive apps in an isolated namespace where hardware identifiers (CPU, Motherboard) and personal files (`/home`) are completely hidden via `tmpfs` mounts.
-- **Time-Correlation Protection:** Apps launched in the sandbox are injected with `faketime`, slightly skewing their clock to defeat millisecond-level time tracking.
+### 🛡️ Core Defenses
+*   **Transparent Proxying**: Captures and routes 100% of TCP traffic through Tor automatically.
+*   **Fail-Close Kill Switch**: If the Tor daemon crashes or the connection drops, the firewall locks down the system. Not a single byte of traffic can leak onto the clearnet.
+*   **DNS Blackholing**: Intercepts DNS queries natively and scrubs them against the StevenBlack blocklist using `dnsmasq`, destroying ads and telemetry requests before routing legitimate domains through Tor.
+*   **IPv6 Disablement**: Hard-disables IPv6 kernel-wide to prevent routing leaks and tunnel bypassing.
+*   **Time Fuzzing**: Protects against clock-skew fingerprinting by using `faketime` to slightly alter timestamps.
 
-### 🌉 Advanced Tor Controls
-- **Disguised Traffic (Snowflake & Obfs4):** Bypass severe censorship by disguising your Tor traffic as WebRTC video calls (Snowflake) or using obfuscated bridges (Obfs4).
-- **Exit Node Selection:** Force your traffic to exit from specific geographic regions (e.g., US, DE).
-- **Split Tunneling:** Run specific trusted applications outside of the Tor network (Clearnet) using the `anonshield-bypass` group.
-- **Ephemeral Hidden Services:** Easily expose a local port as an anonymous `.onion` address.
+### 🧬 Anonymity & Anti-Forensics
+*   **Tor Stream Compartmentalization**: Actively forces `IsolateDestAddr` and `IsolateDestPort`, instructing Tor to build distinct circuits for every website you visit, making traffic correlation impossible.
+*   **Smart MAC Address Blending**: Automatically clones legitimate hardware manufacturer prefixes (Apple, Intel, Samsung) during MAC spoofing to blend perfectly into coffee shop networks.
+*   **TCP Header Mangling**: Defeats deep-packet inspection (DPI) by overwriting the Linux TTL signature (64) to mimic a standard Windows 10 machine (128).
+*   **Protocol Scrubbing**: Uses Privoxy to scrub HTTP headers of identifying telemetry before passing traffic to Tor.
+*   **Disguised Traffic**: Built-in support for Obfs4 bridges and Snowflake proxies to bypass strict ISP-level Tor blocks.
 
-## 🚀 Installation
+### 📦 Sandboxing & Hardening
+*   **Ephemeral microVM Sandbox**: Boot a fully functioning, nestable Alpine Linux Virtual Machine on-the-fly (`qemu`). When closed, the microVM is vaporized from memory, leaving zero forensic trace.
+*   **AppArmor Confinement**: Core application components are strictly confined to prevent malicious takeover.
+*   **Physical Lockdown**: USBGuard integration automatically blocks the insertion of rogue USB devices (Rubber Duckies, badUSBs).
 
-The automated setup script installs all extreme-level dependencies and applies the system hardening rules. It supports Debian/Ubuntu (`apt`), Fedora/RHEL (`dnf`), and Arch Linux (`pacman`).
+### 🚨 Emergency Functions
+*   **Emergency Panic Wipe**: Instantly drops kernel memory caches, shreds temporary state files, violently kills network connections, and blocks all future network access until the machine is hard-rebooted.
 
-```bash
-chmod +x install.sh
-sudo ./install.sh
-```
+---
 
-During installation, the script will:
-1. Install Tor, Bubblewrap, Privoxy, Snowflake, USBGuard, AppArmor, and Python dependencies.
-2. Generate strict Tor configurations (Padding enabled).
-3. Generate and enforce AppArmor profiles.
-4. Set up the split-tunneling group.
+## 🚀 Installation & Usage
 
-## 💻 Usage
+1. **Install the Application:**
+   Run the interactive install script with `sudo`:
+   ```bash
+   sudo ./install.sh
+   ```
+   *The script automatically detects your package manager, downloads dependencies (including the Alpine microVM ISO), and installs the GUI wrapper.*
 
-Launch the application via your desktop menu (**Who Watches Watchers?**) or run the GUI/CLI from the terminal.
+2. **Launch the Interface:**
+   You can run the application directly from your desktop launcher or the terminal:
+   ```bash
+   anonshield-gui
+   ```
+   *(Note: You will be prompted to authenticate via polkit as the core daemon requires root access to manage network namespaces and nftables).*
 
-### Graphical Interface (GUI)
-Run `anonshield-gui` to open the premium dashboard. From here, you can enable Snowflake, trigger a Panic Wipe, rotate your identity, and monitor active Tor circuits.
+3. **Using the Sandbox:**
+   To use the microVM Sandbox, launch the GUI, ensure the shield is active, and click **"Launch microVM Sandbox"**.
 
-### Command Line Interface (CLI)
-```bash
-# Start the hardened proxy
-sudo anonshield start
+---
 
-# Stop the proxy and restore system defaults (Networking, USB, Hostname)
-sudo anonshield stop
+## ⚠️ Important Considerations
 
-# Check status and public IP
-sudo anonshield status
+*   **Clearnet Bypass**: The *Split Tunneling* feature allows you to bypass Tor entirely. Use this **only** for trusted applications that explicitly ban Tor nodes (e.g., banking apps or specific games).
+*   **Speed**: Due to Stream Compartmentalization, your initial page loads may be slower as Tor is forced to aggressively construct new circuits.
+*   **MicroVM**: To use the microVM sandbox, your hardware must support nested virtualization if you are already inside a VM.
 
-# Rotate to a new Tor identity
-sudo anonshield new-id
-
-# Launch an application in the extremely secure sandbox
-sudo anonshield sandbox <command>
-
-# Launch an application bypassing Tor (Clearnet)
-sudo anonshield bypass <command>
-```
-
-## ⚠️ Uninstallation
-
-To completely remove the application, AppArmor profiles, and custom configurations:
-```bash
-sudo ./install.sh uninstall
-```
-
-## ⚖️ Disclaimer
-
-This tool employs extreme measures to protect user privacy. However, no software can guarantee absolute 100% anonymity against all threats. Understand the tools you are using, practice strong operational security (OpSec), and use this software responsibly and at your own risk. The developers are not responsible for any consequences resulting from its use.
+## 🤝 Support & Contributions
+Built with paranoia, for paranoia. If you find a security hole, consider it a zero-day and fix it.
