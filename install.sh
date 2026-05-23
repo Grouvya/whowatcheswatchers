@@ -3134,16 +3134,19 @@ def main():
     if "--kill" in sys.argv:
         print("[Info] Force killing all instances and restoring network...")
         shield = AnonShield()
-        shield.stop()
+        shield.stop_shield()
         os.system("pkill -f anonshield_gui.py")
         sys.exit(0)
 
     if "--reset" in sys.argv:
         print("[Info] Factory resetting app state...")
         shield = AnonShield()
-        shield.stop()
+        shield.stop_shield()
         if os.path.exists("/var/lib/anonshield/state.json"):
             os.system("shred -u /var/lib/anonshield/state.json")
+        # Purge Tor's state cache to fix bootstrap glitches
+        os.system("rm -f /var/lib/tor/state /var/lib/tor/cached-*")
+        os.system("systemctl restart tor")
         os.system("pkill -f anonshield_gui.py")
         sys.exit(0)
 
