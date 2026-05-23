@@ -1,51 +1,81 @@
 # 🛡️ Who Watches Watchers?
 
-**Who Watches Watchers?** is an advanced, premium system-wide privacy suite that routes your entire Linux operating system's TCP and DNS traffic through the Tor anonymity network. It features a stunning Dark Mode dashboard, real-time circuit visualization, network fail-safes, and 1-click Dark Web hosting.
+**Who Watches Watchers?** is a premium, automated transparent proxy and anonymity system for Linux. It routes all system traffic through the Tor network, providing robust privacy, security, and an arsenal of advanced networking features wrapped in a sleek GUI and CLI.
 
-## 🚀 Key Features
+## ✨ Features
 
-*   **System-Wide Anonymity:** Transparently forces all system TCP and DNS traffic through Tor using advanced `nftables` firewall rules, preventing IP leaks and bypassing local network surveillance.
-*   **Stunning Graphical Dashboard:** A beautifully designed, modern dashboard that displays your live bandwidth, active Tor circuits, spoofed MAC hardware addresses, and connection status in real-time.
-*   **Network Kill Switch (Fail-Close):** A background daemon constantly monitors your connection. If Tor crashes or drops unexpectedly, the firewall instantly airgaps your machine, guaranteeing your true IP is never leaked to the Clearnet.
-*   **Split Tunneling (Bypass):** Need to access a local device or play a latency-sensitive game? Use the built-in Split Tunneling to launch specific applications directly over the Clearnet while the rest of your system remains shielded.
-*   **1-Click Hidden Services:** Instantly map any local port on your machine to a globally accessible Dark Web `.onion` domain with the press of a single button.
-*   **Automated MAC Spoofing:** Periodically rotates your physical hardware MAC address to evade local network tracking and WiFi profiling.
+- **Transparent Tor Proxying:** All system traffic (TCP/DNS) is automatically routed through Tor using `nftables`.
+- **System Kill Switch:** Monitors the Tor daemon and immediately blocks all network traffic if the connection drops, preventing accidental IP leaks.
+- **Auto MAC Spoofing & Rotation:** Automatically changes your hardware MAC address upon startup and can rotate it continuously at a set interval (default 15m) to thwart local tracking.
+- **Split Tunneling (Clearnet Bypass):** Run specific applications outside of the Tor network using the `anonshield-bypass` group.
+- **Isolated App Sandbox:** Launch applications in a secure, isolated network namespace.
+- **Advanced Tor Controls:**
+  - Easily request new Tor identities (circuits).
+  - Force Exit Nodes to specific geographic regions (e.g., US, DE).
+  - Enable **Obfs4 Bridges** or custom bridges to bypass deep packet inspection and Tor censorship.
+  - Ephemeral Hidden Service hosting (expose a local port as an `.onion` address).
+- **Premium GUI Dashboard:** Built with `customtkinter`, featuring real-time bandwidth graphs, active Tor circuit routing paths, and system status indicators.
+- **Automated Network Checks:** Warns you if you attempt to start the proxy without an active internet connection.
 
-## 📦 Installation
+## 🚀 Installation
 
-**Who Watches Watchers?** is distributed as a highly portable, self-extracting payload.
+This tool provides a fully automated setup script that works on Debian/Ubuntu (`apt`), Fedora/RHEL (`dnf`), and Arch Linux (`pacman`). 
 
-1. Download the `install.sh` file.
-2. Open a terminal and grant it execute permissions: `chmod +x install.sh`
-3. Run the automated setup: `sudo ./install.sh`
+To install the application and all necessary dependencies:
 
-The installer will automatically detect your Linux distribution, install all required dependencies (`tor`, `macchanger`, `nftables`, etc.), unpack the core binaries, configure the firewall, and deploy a system-wide application shortcut to your Start Menu!
-
-## 🖥️ Usage
-
-You can manage the anonymizer using the **Command Line** or the **Graphical Interface**.
-
-**Graphical Interface:**
-Search for "Who Watches Watchers?" in your Start Menu / App Grid, or launch it from the terminal using:
 ```bash
-pkexec anonshield-gui
-```
-*(The GUI requires your administrative password to securely manipulate system firewall rules)*
-
-**Command Line:**
-```bash
-sudo anonshield start    # Initiate the transparent proxy and secure your connection
-sudo anonshield status   # View current routing details and IP information
-sudo anonshield newid    # Request a new anonymous circuit and external IP
-sudo anonshield stop     # Safely revert your network and disable the proxy
+chmod +x install.sh
+sudo ./install.sh
 ```
 
-## 🗑️ Uninstallation
+During installation, the script will:
+1. Install system dependencies (`tor`, `macchanger`, `nftables`, `obfs4proxy`, etc.)
+2. Create an isolated Python virtual environment and install UI dependencies.
+3. Configure your `/etc/tor/torrc` for transparent proxying.
+4. Set up the `anonshield-bypass` group for split-tunneling.
+5. Create desktop shortcuts and a system tray icon.
 
-If you ever want to completely remove the software and restore your system to its default state, simply run the installer with the uninstall flag:
+## 💻 Usage
+
+After installation, you can launch the application either via your desktop application menu (**Who Watches Watchers?**) or from the command line:
+
+### Graphical Interface (GUI)
+Simply run `anonshield-gui` from your terminal or click the application icon. The GUI provides a full dashboard to start/stop the shield, monitor traffic, and configure advanced settings like bridges and exit nodes.
+
+### Command Line Interface (CLI)
+You can also control the system directly from the command line using the `anonshield` command:
+
 ```bash
-sudo ./install.sh --uninstall
+# Start the transparent proxy and anonymize traffic
+sudo anonshield start
+
+# Stop the proxy and restore normal networking
+sudo anonshield stop
+
+# Check current status, public IP, and active Tor circuit
+sudo anonshield status
+
+# Rotate to a new Tor identity (new circuit)
+sudo anonshield new-id
+
+# Start MAC auto-rotator (rotates every 15 minutes)
+sudo anonshield start-mac-rotator
+
+# Launch an application in the sandbox
+sudo anonshield sandbox <command>
+
+# Launch an application bypassing Tor (Clearnet)
+sudo anonshield bypass <command>
 ```
 
-## ⚠️ Legal Disclaimer
-**Who Watches Watchers?** is developed solely for educational and privacy-enhancing purposes. The author assumes absolutely no responsibility or liability for how this tool is utilized. Any misuse of this application for malicious, unauthorized, or illegal activities is strictly prohibited and is done entirely at the user's own risk. Stay safe and respect the law.
+## ⚠️ Uninstallation
+
+To completely remove the application, its configuration files, and restore your system to its original state, run the install script with the `uninstall` argument:
+
+```bash
+sudo ./install.sh uninstall
+```
+
+## ⚖️ Disclaimer
+
+This tool is designed to enhance privacy and security by leveraging the Tor network. However, no software can guarantee 100% anonymity. Use this tool responsibly and at your own risk. The developers are not responsible for any misuse, data leaks, or legal consequences resulting from the use of this software.
