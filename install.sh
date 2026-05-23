@@ -486,6 +486,7 @@ ConnectionPadding 1
 ReducedConnectionPadding 0
 CircuitBuildTimeout 10
 CookieAuthentication 1
+CookieAuthFileGroupReadable 1
 UseBridges 1
 ClientTransportPlugin snowflake exec /usr/bin/snowflake-client -url https://snowflake-broker.torproject.net/ -ice stun:stun.l.google.com:19302
 Bridge snowflake 192.0.2.3:1 2B280B23E1107BB62ABFC40DDCC8824814F80A72
@@ -536,6 +537,9 @@ EOF
   /opt/anonshield/** mrw,
   /var/lib/anonshield/** mrw,
   /etc/anonshield/** r,
+  /run/tor/** r,
+  /var/run/tor/** r,
+  /etc/tor/** r,
   
   /usr/bin/python* ix,
   /usr/bin/bwrap ix,
