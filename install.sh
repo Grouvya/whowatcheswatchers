@@ -325,7 +325,7 @@ ReducedConnectionPadding 0
 CircuitBuildTimeout 10
 CookieAuthentication 1
 UseBridges 1
-ClientTransportPlugin snowflake exec /usr/bin/snowflake-client -url https://snowflake-broker.torproject.net.global.prod.fastly.net/ -front cdn.sstatic.net -ice stun:stun.l.google.com:19302
+ClientTransportPlugin snowflake exec /usr/bin/snowflake-client -url https://snowflake-broker.torproject.net/ -ice stun:stun.l.google.com:19302
 Bridge snowflake 192.0.2.3:1 2B280B23E1107BB62ABFC40DDCC8824814F80A72
 # --- END ANONSHIELD CONFIGURATION ---
 EOF
@@ -335,13 +335,11 @@ EOF
     echo -e "  ${BOLD}Creating systemd DNS override for Tor (Snowflake Support)...${NC}"
     
     # Resolve Snowflake domains dynamically during install (IPv4 ONLY)
-    SNOWFLAKE_BROKER_IP=$(getent ahostsv4 snowflake-broker.torproject.net.global.prod.fastly.net | awk '{print $1}' | head -n 1)
-    CDN_IP=$(getent ahostsv4 cdn.sstatic.net | awk '{print $1}' | head -n 1)
+    SNOWFLAKE_BROKER_IP=$(getent ahostsv4 snowflake-broker.torproject.net | awk '{print $1}' | head -n 1)
     STUN_IP=$(getent ahostsv4 stun.l.google.com | awk '{print $1}' | head -n 1)
     
     cp /etc/hosts /etc/tor/hosts
-    [ -n "$SNOWFLAKE_BROKER_IP" ] && echo "$SNOWFLAKE_BROKER_IP snowflake-broker.torproject.net.global.prod.fastly.net" >> /etc/tor/hosts
-    [ -n "$CDN_IP" ] && echo "$CDN_IP cdn.sstatic.net" >> /etc/tor/hosts
+    [ -n "$SNOWFLAKE_BROKER_IP" ] && echo "$SNOWFLAKE_BROKER_IP snowflake-broker.torproject.net" >> /etc/tor/hosts
     [ -n "$STUN_IP" ] && echo "$STUN_IP stun.l.google.com" >> /etc/tor/hosts
 
     mkdir -p /etc/systemd/system/tor@default.service.d
