@@ -325,7 +325,7 @@ ReducedConnectionPadding 0
 CircuitBuildTimeout 10
 CookieAuthentication 1
 UseBridges 1
-ClientTransportPlugin snowflake exec /usr/bin/snowflake-client -url https://snowflake-broker.torproject.net.global.prod.fastly.net/ -front cdn.sstatic.net -ice stun:stun.l.google.com:19302,stun:stun.voip.blackberry.com:3478,stun:stun.altar.com.pl:3478,stun:stun.antisip.com:3478,stun:stun.bluesip.net:3478,stun:stun.dus.net:3478,stun:stun.epygi.com:3478,stun:stun.sonetel.com:3478,stun:stun.sonetel.net:3478,stun:stun.stunprotocol.org:3478,stun:stun.uls.co.za:3478,stun:stun.voipgate.com:3478,stun:stun.voys.nl:3478
+ClientTransportPlugin snowflake exec /usr/bin/snowflake-client -url https://snowflake-broker.torproject.net.global.prod.fastly.net/ -front cdn.sstatic.net -ice stun:stun.l.google.com:19302
 Bridge snowflake 192.0.2.3:1 2B280B23E1107BB62ABFC40DDCC8824814F80A72
 # --- END ANONSHIELD CONFIGURATION ---
 EOF
@@ -333,10 +333,22 @@ EOF
 
     # Configure Tor service to use Clearnet DNS (so Snowflake can resolve broker)
     echo -e "  ${BOLD}Creating systemd DNS override for Tor (Snowflake Support)...${NC}"
+    
+    # Resolve Snowflake domains dynamically during install
+    SNOWFLAKE_BROKER_IP=$(getent hosts snowflake-broker.torproject.net.global.prod.fastly.net | awk '{print $1}' | head -n 1)
+    CDN_IP=$(getent hosts cdn.sstatic.net | awk '{print $1}' | head -n 1)
+    STUN_IP=$(getent hosts stun.l.google.com | awk '{print $1}' | head -n 1)
+    
+    cp /etc/hosts /etc/tor/hosts
+    [ -n "$SNOWFLAKE_BROKER_IP" ] && echo "$SNOWFLAKE_BROKER_IP snowflake-broker.torproject.net.global.prod.fastly.net" >> /etc/tor/hosts
+    [ -n "$CDN_IP" ] && echo "$CDN_IP cdn.sstatic.net" >> /etc/tor/hosts
+    [ -n "$STUN_IP" ] && echo "$STUN_IP stun.l.google.com" >> /etc/tor/hosts
+
     mkdir -p /etc/systemd/system/tor@default.service.d
     cat << 'EOF' > /etc/systemd/system/tor@default.service.d/anonshield.conf
 [Service]
 BindReadOnlyPaths=/etc/tor/resolv.conf:/etc/resolv.conf
+BindReadOnlyPaths=/etc/tor/hosts:/etc/hosts
 EOF
     echo "nameserver 1.1.1.1" > /etc/tor/resolv.conf
 
