@@ -99,13 +99,13 @@ do_install() {
         PM="apt-get"
         export DEBIAN_FRONTEND=noninteractive
         apt-get update -qq
-        apt-get install -y -qq tor macchanger nftables python3-rich python3-tk polkitd python3-pip python3-venv python3-stem obfs4proxy libnotify-bin gir1.2-ayatanaappindicator3-0.1 libayatana-appindicator3-1 bubblewrap privoxy snowflake-client usbguard faketime apparmor-utils > /dev/null
+        apt-get install -y -qq tor macchanger nftables python3-rich python3-tk polkitd python3-pip python3-venv python3-stem obfs4proxy libnotify-bin gir1.2-ayatanaappindicator3-0.1 libayatana-appindicator3-1 bubblewrap privoxy snowflake-client usbguard faketime apparmor-utils dnsmasq curl qemu-system-x86 > /dev/null
     elif command -v dnf >/dev/null 2>&1; then
         PM="dnf"
-        dnf install -y -q tor macchanger nftables python3-rich python3-tkinter polkit pip python3-stem obfs4 libnotify libappindicator-gtk3 bubblewrap privoxy snowflake usbguard faketime apparmor-utils > /dev/null
+        dnf install -y -q tor macchanger nftables python3-rich python3-tkinter polkit pip python3-stem obfs4 libnotify libappindicator-gtk3 bubblewrap privoxy snowflake usbguard faketime apparmor-utils dnsmasq curl qemu-system-x86 > /dev/null
     elif command -v pacman >/dev/null 2>&1; then
         PM="pacman"
-        pacman -Sy --noconfirm --needed tor macchanger nftables python-rich tk python-pip python-stem obfs4proxy libnotify libappindicator-gtk3 bubblewrap privoxy snowflake usbguard faketime apparmor-utils > /dev/null
+        pacman -Sy --noconfirm --needed tor macchanger nftables python-rich tk python-pip python-stem obfs4proxy libnotify libappindicator-gtk3 bubblewrap privoxy snowflake usbguard faketime apparmor-utils dnsmasq curl qemu > /dev/null
     else
         echo -e "${RED}✗${NC} Unsupported package manager. Please install dependencies manually."
         exit 1
@@ -138,6 +138,12 @@ do_install() {
     mkdir -p "$STATE_DIR"
     chmod 700 "$STATE_DIR"
     chmod 700 "$STATE_DIR"
+
+    # Download Alpine ISO for microVM sandbox
+    echo -e "  ${BOLD}Downloading Alpine Linux ISO for microVM Sandbox...${NC}"
+    if [ ! -f "/opt/anonshield/sandbox.iso" ]; then
+        curl -sL "https://dl-cdn.alpinelinux.org/alpine/v3.20/releases/x86_64/alpine-virt-3.20.1-x86_64.iso" -o "/opt/anonshield/sandbox.iso"
+    fi
     echo -e "  ${GREEN}✓${NC} Created $APP_DIR, $CONF_DIR, and secure state directory."
 
     # Create basic Privoxy config
@@ -190,9 +196,9 @@ EOF
 # --- ANONSHIELD CONFIGURATION ---
 VirtualAddrNetworkIPv4 10.192.0.0/10
 AutomapHostsOnResolve 1
-TransPort 9040
-DNSPort 9053
-SOCKSPort 9050
+TransPort 9040 IsolateDestAddr IsolateDestPort
+DNSPort 9053 IsolateDestAddr IsolateDestPort
+SOCKSPort 9050 IsolateDestAddr IsolateDestPort
 ControlPort 9051
 ConnectionPadding 1
 ReducedConnectionPadding 0
@@ -381,8 +387,8 @@ class AnonShield:
             # Disable interface
             subprocess.run(["ip", "link", "set", "dev", iface, "down"], capture_output=True, check=False)
             
-            # Spoof MAC using macchanger
-            subprocess.run(["macchanger", "-r", iface], capture_output=True, text=True, check=False)
+            # Spoof MAC using macchanger (Smart blending with known vendors)
+            subprocess.run(["macchanger", "-a", iface], capture_output=True, text=True, check=False)
             
             # Enable interface
             subprocess.run(["ip", "link", "set", "dev", iface, "up"], capture_output=True, check=False)
@@ -510,8 +516,8 @@ DNSStubListener=no
 table inet anonshield {{
     chain prerouting_nat {{
         type nat hook prerouting priority dstnat; policy accept;
-        iifname "veth-anon" udp dport 53 redirect to :{dns_port}
-        iifname "veth-anon" tcp dport 53 redirect to :{dns_port}
+        iifname "veth-anon" udp dport 53 redirect to :5353
+        iifname "veth-anon" tcp dport 53 redirect to :5353
         iifname "veth-anon" meta l4proto tcp redirect to :{trans_port}
     }}
     chain output_nat {{
@@ -521,8 +527,8 @@ table inet anonshield {{
         if has_bypass:
             nft_conf += f'        meta skgid {gid_match} return\n'
             
-        nft_conf += f"""        udp dport 53 redirect to :{dns_port}
-        tcp dport 53 redirect to :{dns_port}
+        nft_conf += f"""        udp dport 53 redirect to :5353
+        tcp dport 53 redirect to :5353
 """
         if self.config["bypass_lan"]:
             for lan in self.config["lan_ranges"]:
@@ -554,6 +560,10 @@ table inet anonshield {{
                     nft_conf += f"        ip daddr {lan} accept\n"
                 
         nft_conf += f"""        reject
+    }}
+    chain postrouting_mangle {{
+        type filter hook postrouting priority mangle; policy accept;
+        meta l4proto tcp ip ttl set 128
     }}
 }}
 """
@@ -811,6 +821,46 @@ table inet anonshield {{
             subprocess.run(["ip", "netns", "delete", ns_name], check=False, capture_output=True)
             subprocess.run(["ip", "link", "delete", "veth-anon"], check=False, capture_output=True)
             
+    def microvm_sandbox(self):
+        self.check_root()
+        if not self.is_anonshield_active():
+            console_print("[bold red]Who Watches Watchers? must be active to use the microVM sandbox.[/bold red]")
+            return
+            
+        ns_name = "anonvm"
+        iso_path = "/opt/anonshield/sandbox.iso"
+        
+        if not os.path.exists(iso_path):
+            console_print(f"[bold red]microVM ISO not found at {iso_path}. Please reinstall to download it.[/bold red]")
+            return
+            
+        console_print(f"[bold cyan]📦 Starting ephemeral microVM Sandbox...[/bold cyan]")
+        
+        try:
+            subprocess.run(["ip", "netns", "delete", ns_name], check=False, capture_output=True)
+            subprocess.run(["ip", "link", "delete", "veth-vm"], check=False, capture_output=True)
+            
+            subprocess.run(["ip", "netns", "add", ns_name], check=True, capture_output=True)
+            subprocess.run(["ip", "link", "add", "veth-vm", "type", "veth", "peer", "name", "veth-ns"], check=True, capture_output=True)
+            subprocess.run(["ip", "link", "set", "veth-ns", "netns", ns_name], check=True, capture_output=True)
+            
+            subprocess.run(["ip", "addr", "add", "10.192.1.1/24", "dev", "veth-vm"], check=True, capture_output=True)
+            subprocess.run(["ip", "link", "set", "veth-vm", "up"], check=True, capture_output=True)
+            
+            subprocess.run(["ip", "netns", "exec", ns_name, "ip", "addr", "add", "10.192.1.2/24", "dev", "veth-ns"], check=True, capture_output=True)
+            subprocess.run(["ip", "netns", "exec", ns_name, "ip", "link", "set", "veth-ns", "up"], check=True, capture_output=True)
+            subprocess.run(["ip", "netns", "exec", ns_name, "ip", "link", "set", "lo", "up"], check=True, capture_output=True)
+            subprocess.run(["ip", "netns", "exec", ns_name, "ip", "route", "add", "default", "via", "10.192.1.1"], check=True, capture_output=True)
+            
+            console_print("[green]microVM Sandbox ready. Booting Alpine Linux...[/green]")
+            qemu_cmd = ["qemu-system-x86_64", "-m", "1024", "-snapshot", "-cdrom", iso_path, "-vga", "virtio", "-display", "gtk"]
+            subprocess.run(["ip", "netns", "exec", ns_name] + qemu_cmd)
+            
+        finally:
+            console_print("[bold cyan]🧹 Cleaning up microVM...[/bold cyan]")
+            subprocess.run(["ip", "netns", "delete", ns_name], check=False, capture_output=True)
+            subprocess.run(["ip", "link", "delete", "veth-vm"], check=False, capture_output=True)
+            
     def bypass_command(self, cmd_args):
         self.check_root()
         try:
@@ -904,6 +954,20 @@ table inet anonshield {{
             console_print("[green]✓ USBGuard physical lockdown active. New devices will be blocked.[/green]")
         except Exception as e:
             console_print(f"[yellow]⚠️ Failed to configure USBGuard: {e}[/yellow]")
+
+        # 2.7 DNS Blackholing (dnsmasq)
+        try:
+            blacklist_path = "/etc/anonshield/hosts.blacklist"
+            if not os.path.exists(blacklist_path):
+                console_print("[cyan]⬇️ Downloading StevenBlack DNS Blacklist...[/cyan]")
+                subprocess.run(["curl", "-sL", "https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts", "-o", blacklist_path], check=False)
+            
+            subprocess.run(["pkill", "dnsmasq"], check=False)
+            dnsmasq_cmd = ["dnsmasq", "-p", "5353", "--no-resolv", f"--server=127.0.0.1#{self.config['tor_dns_port']}", f"--addn-hosts={blacklist_path}"]
+            subprocess.run(dnsmasq_cmd, check=False)
+            console_print("[green]✓ DNS Blackholing active (Telemetry/Ads blocked).[/green]")
+        except Exception as e:
+            console_print(f"[yellow]⚠️ Failed to start dnsmasq: {e}[/yellow]")
 
         # 3. Wait for Tor circuit bootstrap
         is_terminal = hasattr(sys.stdout, 'isatty') and sys.stdout.isatty()
@@ -1042,6 +1106,7 @@ table inet anonshield {{
             subprocess.run(["systemctl", "stop", "privoxy"], capture_output=True)
             subprocess.run(["systemctl", "stop", "usbguard"], capture_output=True)
             subprocess.run(["usbguard", "allow-device", "-a"], capture_output=True)
+            subprocess.run(["pkill", "dnsmasq"], capture_output=True)
         except Exception:
             pass
         console_print("[green]✓ DNS, Hostname, IPv6, and USBGuard settings restored.[/green]")
@@ -1756,6 +1821,11 @@ class AnonShieldGUI:
         )
         self.btn_hidden.pack(fill="x", pady=3)
 
+        self.btn_microvm = self.create_flat_button(
+            tools_frame, "📦 Launch microVM Sandbox", "#06b6d4", self.on_microvm
+        )
+        self.btn_microvm.pack(fill="x", pady=3)
+
         # Branding
         branding_label = ctk.CTkLabel(
             right_frame, text="Created with ❤  by Grouvya!", 
@@ -1800,6 +1870,7 @@ class AnonShieldGUI:
         if hasattr(self, 'mac_rotator_switch'): self.mac_rotator_switch.configure(state=state_val)
         if hasattr(self, 'btn_bypass'): self.btn_bypass.configure(state=state_val)
         if hasattr(self, 'btn_hidden'): self.btn_hidden.configure(state=state_val)
+        if hasattr(self, 'btn_microvm'): self.btn_microvm.configure(state=state_val)
         with self.action_lock:
             pass  # Lock exists; action_lock is now a threading.Lock for thread safety
         # Use a simple flag bool for UI-thread checks (Tkinter is single-threaded for UI)
@@ -1964,6 +2035,20 @@ class AnonShieldGUI:
             return
             
         self.show_split_tunnel_dialog()
+
+    def on_microvm(self):
+        if not self.shield.is_anonshield_active():
+            messagebox.showinfo("Who Watches Watchers?", "Who Watches Watchers? must be active to launch the microVM sandbox.")
+            return
+        
+        def run_vm():
+            try:
+                self.shield.microvm_sandbox()
+            except Exception as e:
+                print(f"\n[Error]: {e}")
+                
+        print("\n[Info]: Launching Ephemeral microVM Sandbox...")
+        threading.Thread(target=run_vm, daemon=True).start()
 
     def on_hidden_service(self):
         if not self.shield.is_anonshield_active():
