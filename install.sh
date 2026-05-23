@@ -2514,6 +2514,16 @@ class AnonShieldGUI:
         )
         self.btn_stop.pack(fill="x", pady=5)
 
+        self.btn_force_kill = self.create_flat_button(
+            actions_card, "⚡ Force Kill & Restore Network", "#F59E0B", self.on_force_kill
+        )
+        self.btn_force_kill.pack(fill="x", pady=5)
+
+        self.btn_reset = self.create_flat_button(
+            actions_card, "🔄 Factory Reset App", "#EF4444", self.on_reset_app
+        )
+        self.btn_reset.pack(fill="x", pady=5)
+
         self.btn_panic = self.create_flat_button(
             actions_card, "🚨 EMERGENCY PANIC WIPE", "#FF0000", self.on_panic
         )
@@ -3009,7 +3019,41 @@ class AnonShieldGUI:
         if messagebox.askyesno("EMERGENCY PANIC", "Are you sure? This will drop memory caches, kill the connection, and shred state files. All network traffic will be blocked until reboot."):
             threading.Thread(target=self.shield.panic_wipe, daemon=True).start()
 
+    def on_force_kill(self):
+        if messagebox.askyesno("Force Kill & Restore", "Are you sure you want to forcefully kill all instances and restore normal networking?"):
+            subprocess.Popen([sys.executable, sys.argv[0], "--kill"])
+            sys.exit(0)
+
+    def on_reset_app(self):
+        if messagebox.askyesno("Factory Reset", "Are you sure you want to factory reset the app? This will wipe the cache and restore normal networking."):
+            subprocess.Popen([sys.executable, sys.argv[0], "--reset"])
+            sys.exit(0)
+
 def main():
+    if "--kill" in sys.argv:
+        print("[Info] Force killing all instances and restoring network...")
+        shield = AnonShield()
+        shield.stop()
+        os.system("pkill -f anonshield_gui.py")
+        sys.exit(0)
+
+    if "--reset" in sys.argv:
+        print("[Info] Factory resetting app state...")
+        shield = AnonShield()
+        shield.stop()
+        if os.path.exists("/var/lib/anonshield/state.json"):
+            os.system("shred -u /var/lib/anonshield/state.json")
+        os.system("pkill -f anonshield_gui.py")
+        sys.exit(0)
+
+    lock_file = open('/tmp/anonshield_gui.lock', 'w')
+    try:
+        import fcntl
+        fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except IOError:
+        print("Another instance of AnonShield GUI is already running. Exiting.")
+        sys.exit(1)
+
     root = ctk.CTk()
     app = AnonShieldGUI(root)
     root.mainloop()
