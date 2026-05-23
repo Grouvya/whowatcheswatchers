@@ -138,6 +138,30 @@ PYEOF
     # Allow all USB devices again after USBGuard is stopped
     usbguard allow-device -a > /dev/null 2>&1
 
+    # 2h.5 Stop mitmproxy Fingerprint Shield and remove its CA certificate
+    echo -e "  ${BOLD}• Cleaning up Fingerprint Shield (mitmproxy interceptor)...${NC}"
+    pkill -f "mitmdump.*8119" > /dev/null 2>&1 || true
+    pkill -f "mitmdump.*fp_inject" > /dev/null 2>&1 || true
+    rm -f /var/lib/anonshield/mitm.pid
+    # Remove CA from system trust store
+    if [ -f "/usr/local/share/ca-certificates/anonshield-mitm.crt" ]; then
+        rm -f /usr/local/share/ca-certificates/anonshield-mitm.crt
+        update-ca-certificates --fresh > /dev/null 2>&1
+        echo -e "    ${GREEN}✓${NC} Fingerprint Shield CA removed from system trust store."
+    fi
+    # Remove CA from Firefox/Chrome NSS databases for the real user
+    if command -v certutil > /dev/null 2>&1 && [ -n "$REAL_HOME" ]; then
+        for FF_PROF in "$REAL_HOME"/.mozilla/firefox/*.default* "$REAL_HOME"/.mozilla/firefox/*.default-release*; do
+            [ -d "$FF_PROF" ] && certutil -D -n "AnonShield-MITM" -d "sql:$FF_PROF" > /dev/null 2>&1 || true
+        done
+        [ -d "$REAL_HOME/.pki/nssdb" ] && certutil -D -n "AnonShield-MITM" -d "sql:$REAL_HOME/.pki/nssdb" > /dev/null 2>&1 || true
+        echo -e "    ${GREEN}✓${NC} Fingerprint Shield CA removed from browser certificate stores."
+    fi
+    # Remove mitmproxy config directory and injection script
+    rm -rf /etc/anonshield/mitmproxy
+    rm -f /opt/anonshield/fp_inject.py
+    echo -e "  ${GREEN}✓${NC} Fingerprint Shield fully removed."
+
     # Kill the dnsmasq instance launched by anonshield (bound to port 5353)
     pkill -f "dnsmasq.*5353" > /dev/null 2>&1 || true
 
@@ -231,13 +255,13 @@ do_install() {
         PM="apt-get"
         export DEBIAN_FRONTEND=noninteractive
         apt-get update -qq
-        apt-get install -y -qq tor macchanger nftables python3-rich python3-tk polkitd python3-pip python3-venv python3-stem obfs4proxy libnotify-bin gir1.2-ayatanaappindicator3-0.1 libayatana-appindicator3-1 bubblewrap privoxy snowflake-client usbguard faketime apparmor-utils dnsmasq curl qemu-system-x86 i2pd gcc make git cryptsetup ecryptfs-utils secure-delete dnscrypt-proxy htpdate > /dev/null
+        apt-get install -y -qq tor macchanger nftables python3-rich python3-tk polkitd python3-pip python3-venv python3-stem obfs4proxy libnotify-bin gir1.2-ayatanaappindicator3-0.1 libayatana-appindicator3-1 bubblewrap privoxy snowflake-client usbguard faketime apparmor-utils dnsmasq curl qemu-system-x86 i2pd gcc make git cryptsetup ecryptfs-utils secure-delete dnscrypt-proxy htpdate mitmproxy libnss3-tools > /dev/null
     elif command -v dnf >/dev/null 2>&1; then
         PM="dnf"
-        dnf install -y -q tor macchanger nftables python3-rich python3-tkinter polkit pip python3-stem obfs4 libnotify libappindicator-gtk3 bubblewrap privoxy snowflake usbguard faketime apparmor-utils dnsmasq curl qemu-system-x86 i2pd gcc make git cryptsetup ecryptfs-utils secure-delete dnscrypt-proxy htpdate > /dev/null
+        dnf install -y -q tor macchanger nftables python3-rich python3-tkinter polkit pip python3-stem obfs4 libnotify libappindicator-gtk3 bubblewrap privoxy snowflake usbguard faketime apparmor-utils dnsmasq curl qemu-system-x86 i2pd gcc make git cryptsetup ecryptfs-utils secure-delete dnscrypt-proxy htpdate mitmproxy nss-tools > /dev/null
     elif command -v pacman >/dev/null 2>&1; then
         PM="pacman"
-        pacman -Sy --noconfirm --needed tor macchanger nftables python-rich tk python-pip python-stem obfs4proxy libnotify libappindicator-gtk3 bubblewrap privoxy snowflake usbguard faketime apparmor-utils dnsmasq curl qemu i2pd gcc make git cryptsetup ecryptfs-utils secure-delete dnscrypt-proxy htpdate > /dev/null
+        pacman -Sy --noconfirm --needed tor macchanger nftables python-rich tk python-pip python-stem obfs4proxy libnotify libappindicator-gtk3 bubblewrap privoxy snowflake usbguard faketime apparmor-utils dnsmasq curl qemu i2pd gcc make git cryptsetup ecryptfs-utils secure-delete dnscrypt-proxy htpdate mitmproxy nss > /dev/null
     else
         echo -e "${RED}✗${NC} Unsupported package manager. Please install dependencies manually."
         exit 1
@@ -259,9 +283,9 @@ do_install() {
     
     echo -e "\n  ${BOLD}Installing additional Python packages inside virtual environment...${NC}"
     python3 -m venv "$APP_DIR/venv"
-    "$APP_DIR/venv/bin/pip" install customtkinter stem pystray Pillow matplotlib rich > /dev/null 2>&1
+    "$APP_DIR/venv/bin/pip" install customtkinter stem pystray Pillow matplotlib rich mitmproxy > /dev/null 2>&1
     if [ $? -eq 0 ]; then
-      echo -e "  ${GREEN}✓${NC} Installed Python pip packages in venv: customtkinter, stem, pystray, Pillow, matplotlib, rich"
+      echo -e "  ${GREEN}✓${NC} Installed Python pip packages in venv: customtkinter, stem, pystray, Pillow, matplotlib, rich, mitmproxy"
     else
       echo -e "  ${RED}✗${NC} Failed to install pip dependencies in venv."
       exit 1
@@ -589,6 +613,7 @@ class AnonShield:
         self._stop_rotator = threading.Event()
         self.mac_thread = None
         self.ks_thread = None
+        self.fp_randomizer = None
 
     def load_config(self):
         config = {
@@ -1385,10 +1410,19 @@ table inet anonshield {{
                 time.sleep(sleep_interval)
                 
         if tor_status and tor_status.get("IsTor"):
+            # Auto-start Fingerprint Shield when Tor connection succeeds
+            try:
+                self.fp_randomizer = FingerprintRandomizer()
+                self.fp_randomizer.start()
+                fp_status = "Active (randomizing all browsers)"
+            except Exception as fp_e:
+                fp_status = f"Unavailable ({fp_e})"
+                self.fp_randomizer = None
             rprint(Panel.fit(
                 f"[bold green]✓ SUCCESS: YOUR CONNECTION IS SECURED BY TOR NETWORK![/bold green]\n\n"
                 f"  • [bold]External IP:[/bold] {tor_status.get('IP')}\n"
                 f"  • [bold]MAC Spoofing:[/bold] {'Active (Enabled)' if self.config['spoof_mac_on_start'] else 'Disabled'}\n"
+                f"  • [bold]Fingerprint Shield:[/bold] {fp_status}\n"
                 f"  • [bold]Kill Switch:[/bold] Active (Blocks all leaks if Tor fails)",
                 border_style="green", title="Shield Status: ACTIVE"
             ))
@@ -1434,6 +1468,14 @@ table inet anonshield {{
         
         self.restore_macs()
         self.stop_mac_rotator()
+        
+        # Stop Fingerprint Shield if running
+        if hasattr(self, 'fp_randomizer') and self.fp_randomizer:
+            try:
+                self.fp_randomizer.stop()
+            except Exception:
+                pass
+            self.fp_randomizer = None
         
         self.bw_listening = False
         self.send_notification("Who Watches Watchers? Offline", "Transparent proxy disabled. Connection restored to clearnet.")
@@ -1613,6 +1655,257 @@ table inet anonshield {{
             console_print(f"[green]✓ MAC restored to permanent hardware: {curr_mac}[/green]")
 
 
+
+class FingerprintRandomizer:
+    """
+    Transparently intercepts HTTP/HTTPS traffic to inject a JavaScript payload
+    that randomly spoofs browser fingerprinting vectors (Canvas, WebGL, Audio, User-Agent, etc.)
+    using mitmproxy.
+    """
+    def __init__(self):
+        self.script_path = "/opt/anonshield/fp_inject.py"
+        self.cert_dir = "/etc/anonshield/mitmproxy"
+        self.pid_file = "/var/lib/anonshield/mitm.pid"
+        self._write_mitm_script()
+        
+    def _write_mitm_script(self):
+        js_payload = """
+        // Anti-Fingerprinting Payload injected by Who Watches Watchers?
+        (function() {
+            const getRand = () => Math.random() * 2 - 1;
+            const getRandInt = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
+            
+            // Randomize Canvas
+            const originalGetContext = HTMLCanvasElement.prototype.getContext;
+            HTMLCanvasElement.prototype.getContext = function(type, ...args) {
+                const context = originalGetContext.apply(this, [type, ...args]);
+                if (type === '2d' && context) {
+                    const originalGetImageData = context.getImageData;
+                    context.getImageData = function(...args2) {
+                        const imageData = originalGetImageData.apply(this, args2);
+                        for (let i = 0; i < imageData.data.length; i += 4) {
+                            imageData.data[i] += getRand() * 2;
+                            imageData.data[i+1] += getRand() * 2;
+                            imageData.data[i+2] += getRand() * 2;
+                        }
+                        return imageData;
+                    };
+                }
+                return context;
+            };
+
+            // Randomize WebGL
+            const originalGetParameter = WebGLRenderingContext.prototype.getParameter;
+            const randWebGLVendor = ['Intel Inc.', 'AMD', 'NVIDIA Corporation', 'Apple'][getRandInt(0,3)];
+            const randWebGLRenderer = ['Intel Iris OpenGL Engine', 'AMD Radeon Graphics', 'NVIDIA GeForce RTX 3060', 'Apple M1'][getRandInt(0,3)];
+            WebGLRenderingContext.prototype.getParameter = function(parameter) {
+                if (parameter === 37445) return randWebGLVendor; // UNMASKED_VENDOR_WEBGL
+                if (parameter === 37446) return randWebGLRenderer; // UNMASKED_RENDERER_WEBGL
+                return originalGetParameter.apply(this, [parameter]);
+            };
+
+            // Randomize Audio
+            const originalCreateOscillator = BaseAudioContext.prototype.createOscillator;
+            BaseAudioContext.prototype.createOscillator = function() {
+                const osc = originalCreateOscillator.apply(this);
+                const originalStart = osc.start;
+                osc.start = function(...args) {
+                    osc.frequency.value += getRand() * 5;
+                    return originalStart.apply(this, args);
+                };
+                return osc;
+            };
+            
+            // Randomize Screen
+            const resolutions = [[1920, 1080], [1366, 768], [1536, 864], [2560, 1440]];
+            const res = resolutions[getRandInt(0, resolutions.length - 1)];
+            Object.defineProperty(screen, 'width', {get: () => res[0] + getRandInt(-50, 50)});
+            Object.defineProperty(screen, 'height', {get: () => res[1] + getRandInt(-50, 50)});
+            Object.defineProperty(screen, 'availWidth', {get: () => res[0] + getRandInt(-50, 50)});
+            Object.defineProperty(screen, 'availHeight', {get: () => res[1] + getRandInt(-50, 50)});
+            Object.defineProperty(screen, 'colorDepth', {get: () => [24, 30][getRandInt(0,1)]});
+            
+            // WebRTC Leak Prevention
+            window.RTCPeerConnection = function() { throw new Error('WebRTC disabled by AnonShield'); };
+            
+            // Randomize Navigator Properties
+            const uas = [
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/' + getRandInt(100, 148) + '.0.0.0 Safari/537.36',
+                'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/' + getRandInt(15, 17) + '.0 Safari/605.1.15',
+                'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Firefox/' + getRandInt(110, 130) + '.0'
+            ];
+            const platforms = ['Win32', 'MacIntel', 'Linux x86_64'];
+            const idx = getRandInt(0, 2);
+            
+            Object.defineProperty(navigator, 'userAgent', {get: () => uas[idx]});
+            Object.defineProperty(navigator, 'platform', {get: () => platforms[idx]});
+            Object.defineProperty(navigator, 'hardwareConcurrency', {get: () => [2,4,8,16,32][getRandInt(0,4)]});
+            Object.defineProperty(navigator, 'deviceMemory', {get: () => [4,8,16,32,64][getRandInt(0,4)]});
+            Object.defineProperty(navigator, 'language', {get: () => ['en-US', 'en-GB', 'fr-FR', 'de-DE', 'es-ES'][getRandInt(0,4)]});
+            Object.defineProperty(navigator, 'languages', {get: () => [navigator.language, 'en']});
+            Object.defineProperty(navigator, 'doNotTrack', {get: () => [null, '1', 'unspecified'][getRandInt(0,2)]});
+            
+            // Spoof Timezone
+            const timezones = ['UTC', 'America/New_York', 'Europe/London', 'Asia/Tokyo'];
+            const tz = timezones[getRandInt(0, 3)];
+            const originalDateTimeFormat = Intl.DateTimeFormat;
+            Intl.DateTimeFormat = function(...args) {
+                if (args.length === 0) args = [undefined, {}];
+                if (args.length === 1 && typeof args[0] === 'string') args = [args[0], {}];
+                if (!args[1].timeZone) args[1].timeZone = tz;
+                return new originalDateTimeFormat(...args);
+            };
+            Intl.DateTimeFormat.prototype = originalDateTimeFormat.prototype;
+            
+            // Spoof Plugins Length
+            Object.defineProperty(navigator, 'plugins', {get: () => ({ length: getRandInt(0, 5) })});
+            
+        })();
+        """
+        
+        script_content = f'''
+import random
+from mitmproxy import http
+
+# Injected by Who Watches Watchers? Fingerprint Shield
+INJECT_JS = """<script type="text/javascript">{{js_payload}}</script>"""
+
+# Pre-defined pools for randomizing HTTP headers
+USER_AGENTS = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:109.0) Gecko/20100101 Firefox/115.0",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
+]
+
+ACCEPTS = [
+    "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+    "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+    "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+]
+
+LANGUAGES = [
+    "en-US,en;q=0.9",
+    "en-GB,en;q=0.9",
+    "en-US,en;q=0.5",
+    "fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7",
+    "de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7"
+]
+
+def request(flow: http.HTTPFlow) -> None:
+    # Randomize headers for every outgoing request
+    flow.request.headers["User-Agent"] = random.choice(USER_AGENTS)
+    flow.request.headers["Accept"] = random.choice(ACCEPTS)
+    flow.request.headers["Accept-Language"] = random.choice(LANGUAGES)
+    
+    # Strip highly identifying headers entirely if they exist
+    for h in ["Sec-Ch-Ua", "Sec-Ch-Ua-Mobile", "Sec-Ch-Ua-Platform", "Sec-Ch-Ua-Platform-Version"]:
+        if h in flow.request.headers:
+            del flow.request.headers[h]
+            
+    # Randomly toggle Upgrade-Insecure-Requests
+    flow.request.headers["Upgrade-Insecure-Requests"] = random.choice(["1", "0"])
+
+def response(flow: http.HTTPFlow) -> None:
+    if flow.response and flow.response.content:
+        content_type = flow.response.headers.get("Content-Type", "")
+        if "text/html" in content_type:
+            html = flow.response.content.decode("utf-8", "ignore")
+            # Inject right after <head> or at top if no head
+            js_tag = INJECT_JS.replace("{{js_payload}}", """{js_payload}""")
+            if "<head>" in html:
+                html = html.replace("<head>", "<head>" + js_tag, 1)
+            elif "<html>" in html:
+                html = html.replace("<html>", "<html>" + js_tag, 1)
+            else:
+                html = js_tag + html
+            flow.response.content = html.encode("utf-8")
+'''
+        with open(self.script_path, "w") as f:
+            f.write(script_content)
+
+    def is_running(self):
+        if not os.path.exists(self.pid_file):
+            return False
+        with open(self.pid_file, "r") as f:
+            try:
+                pid = int(f.read().strip())
+                os.kill(pid, 0)
+                return True
+            except (ValueError, OSError):
+                return False
+
+    def start(self):
+        if self.is_running():
+            return
+            
+        os.makedirs(self.cert_dir, exist_ok=True)
+        
+        # We start mitmproxy in transparent mode listening on port 8119.
+        # It runs in the background.
+        cmd = [
+            "mitmdump",
+            "--mode", "transparent",
+            "--listen-port", "8119",
+            "--set", f"confdir={self.cert_dir}",
+            "--set", "block_global=false",
+            "-s", self.script_path
+        ]
+        
+        # Run detached
+        proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        with open(self.pid_file, "w") as f:
+            f.write(str(proc.pid))
+            
+        # Add iptables/nftables rule to redirect ports 80 and 443 to 8119
+        subprocess.run(["nft", "add", "rule", "inet", "anonshield", "prerouting_redirect", "tcp", "dport", "{ 80, 443 }", "redirect", "to", ":8119"], check=False)
+        
+        # Copy the dynamically generated CA to system trust store so browsers accept the proxy
+        time.sleep(2) # Give mitmproxy time to generate certs
+        ca_cert = os.path.join(self.cert_dir, "mitmproxy-ca-cert.cer")
+        if os.path.exists(ca_cert):
+            subprocess.run(["cp", ca_cert, "/usr/local/share/ca-certificates/anonshield-mitm.crt"], check=False)
+            subprocess.run(["update-ca-certificates", "--fresh"], check=False)
+            
+            # Inject into Firefox/Chrome NSS DBs for local user (if certutil is installed)
+            if subprocess.run(["which", "certutil"], capture_output=True).returncode == 0:
+                user = os.environ.get("SUDO_USER", "root")
+                home = os.path.expanduser(f"~{user}")
+                
+                # Firefox
+                ff_dir = os.path.join(home, ".mozilla/firefox")
+                if os.path.isdir(ff_dir):
+                    for d in os.listdir(ff_dir):
+                        if ".default" in d:
+                            db_path = os.path.join(ff_dir, d)
+                            subprocess.run(["certutil", "-A", "-n", "AnonShield-MITM", "-t", "TCu,Cuw,Tuw", "-i", ca_cert, "-d", f"sql:{db_path}"], check=False)
+                # Chrome/Chromium
+                pki_dir = os.path.join(home, ".pki/nssdb")
+                if os.path.isdir(pki_dir):
+                    subprocess.run(["certutil", "-A", "-n", "AnonShield-MITM", "-t", "TCu,Cuw,Tuw", "-i", ca_cert, "-d", f"sql:{pki_dir}"], check=False)
+
+    def stop(self):
+        if self.is_running():
+            with open(self.pid_file, "r") as f:
+                pid = int(f.read().strip())
+            try:
+                os.kill(pid, 15)
+            except OSError:
+                pass
+            os.remove(self.pid_file)
+            
+        subprocess.run(["pkill", "-f", "mitmdump.*8119"], check=False)
+        
+        # Remove redirect rules
+        # Just flush the entire anonshield ruleset and let AnonShield restart it if necessary,
+        # OR attempt targeted deletion. We will use a targeted deletion approach here by looking up the handle.
+        res = subprocess.run(["nft", "-a", "list", "chain", "inet", "anonshield", "prerouting_redirect"], capture_output=True, text=True)
+        for line in res.stdout.splitlines():
+            if "8119" in line and "handle" in line:
+                handle = line.split("handle")[-1].strip()
+                subprocess.run(["nft", "delete", "rule", "inet", "anonshield", "prerouting_redirect", "handle", handle], check=False)
+
 def main():
     disclaimer = (
         "\n[bold yellow]⚠️  LEGAL DISCLAIMER:[/bold yellow] "
@@ -1644,6 +1937,9 @@ def main():
     bypass_parser = subparsers.add_parser("bypass", help="Run a specific command that bypasses Tor and connects to the Clearnet")
     bypass_parser.add_argument("cmd", nargs=argparse.REMAINDER, help="The command to execute without Tor routing")
 
+    fp_parser = subparsers.add_parser("fingerprint", help="Control the browser fingerprint randomization shield")
+    fp_parser.add_argument("action", choices=["start", "stop", "status"],
+                           help="'start' to enable fingerprint spoofing, 'stop' to disable, 'status' to check")
     args = parser.parse_args()
 
     if not args.command:
@@ -1672,7 +1968,19 @@ def main():
             console_print("[red]Please provide a command to run bypassing Tor.[/red]")
         else:
             shield.bypass_command(args.cmd)
-
+    elif args.command == "fingerprint":
+        fp = FingerprintRandomizer()
+        if args.action == "start":
+            shield.check_root()
+            fp.start()
+        elif args.action == "stop":
+            shield.check_root()
+            fp.stop()
+        elif args.action == "status":
+            active = fp.is_running()
+            color = "green" if active else "red"
+            state = "ACTIVE" if active else "INACTIVE"
+            console_print(f"[{color}]\ud83c\udfad Fingerprint Shield: {state}[/{color}]")
 if __name__ == "__main__":
     main()
 
@@ -1707,7 +2015,7 @@ ctk.set_default_color_theme("blue")
 
 # Ensure we can import from the directory
 sys.path.insert(0, "/opt/anonshield")
-from anonshield import AnonShield
+from anonshield import AnonShield, FingerprintRandomizer
 
 # Styling Constants (Modern Flat Dark Theme)
 BG_MAIN = "#121214"
@@ -2097,6 +2405,14 @@ class AnonShieldGUI:
         )
         self.mac_rotator_switch.pack(anchor="w", pady=(0, 10))
 
+        self.fp_var = ctk.BooleanVar(value=False)
+        self.fp_switch = ctk.CTkSwitch(
+            opts_frame, text="🎭 Fingerprint Shield (Anti-Tracking)",
+            variable=self.fp_var, command=self.on_fp_shield_change,
+            progress_color=COLOR_ONION
+        )
+        self.fp_switch.pack(anchor="w", pady=(0, 10))
+
         # Action Buttons
         self.btn_start = self.create_flat_button(
             actions_card, "🛡️ Start Anonymizer", COLOR_SECURE, self.on_start_shield
@@ -2193,6 +2509,7 @@ class AnonShieldGUI:
         if hasattr(self, 'btn_bypass'): self.btn_bypass.configure(state=state_val)
         if hasattr(self, 'btn_hidden'): self.btn_hidden.configure(state=state_val)
         if hasattr(self, 'btn_microvm'): self.btn_microvm.configure(state=state_val)
+        if hasattr(self, 'fp_switch'):  self.fp_switch.configure(state=state_val)
         with self.action_lock:
             pass  # Lock exists; action_lock is now a threading.Lock for thread safety
         # Use a simple flag bool for UI-thread checks (Tkinter is single-threaded for UI)
@@ -2352,6 +2669,36 @@ class AnonShieldGUI:
         else:
             print("\n[Info]: MAC Auto-Rotator Disabled")
             self.shield.stop_mac_rotator()
+
+    def on_fp_shield_change(self):
+        enable = self.fp_var.get()
+        if enable:
+            print("\n[Info]: Fingerprint Shield Enabling...")
+            def _start():
+                try:
+                    fp = FingerprintRandomizer()
+                    self.shield.fp_randomizer = fp
+                    fp.start()
+                    print("\n[Info]: Fingerprint Shield ACTIVE — all browsers protected.")
+                except Exception as e:
+                    print(f"\n[Error]: Fingerprint Shield failed to start: {e}")
+                    self.root.after(0, lambda: self.fp_var.set(False))
+            threading.Thread(target=_start, daemon=True).start()
+        else:
+            print("\n[Info]: Fingerprint Shield Disabling...")
+            def _stop():
+                try:
+                    if hasattr(self.shield, 'fp_randomizer') and self.shield.fp_randomizer:
+                        self.shield.fp_randomizer.stop()
+                        self.shield.fp_randomizer = None
+                    else:
+                        # Attempt to stop any orphaned mitmproxy process
+                        fp = FingerprintRandomizer()
+                        fp.stop()
+                    print("\n[Info]: Fingerprint Shield deactivated.")
+                except Exception as e:
+                    print(f"\n[Error]: {e}")
+            threading.Thread(target=_stop, daemon=True).start()
 
     def on_bypass_app(self):
         if not self.shield.is_anonshield_active():
