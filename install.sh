@@ -572,6 +572,7 @@ import threading
 import grp
 import urllib.request
 import urllib.error
+import ssl
 import shlex
 import pwd
 import tempfile
@@ -1242,13 +1243,17 @@ table inet anonshield {{
             ("https://ifconfig.me/all.json", lambda d: {"IP": json.loads(d).get("ip_addr"), "IsTor": False})
         ]
         
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        
         for url, parser in endpoints:
             try:
                 req = urllib.request.Request(
                     url, 
                     headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; rv:109.0) Gecko/20100101 Firefox/115.0'}
                 )
-                with urllib.request.urlopen(req, timeout=5) as response:
+                with urllib.request.urlopen(req, timeout=20, context=ctx) as response:
                     data = response.read().decode()
                     parsed = parser(data)
                     return parsed
