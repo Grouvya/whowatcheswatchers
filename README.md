@@ -1,94 +1,102 @@
 # 🛡️ Who Watches Watchers? (Antigravity Shield)
 
-*An advanced, system-wide Anonymity Engine and Fingerprint Shield designed for extreme privacy.*
+*An advanced, system-wide Anonymity Engine, Transparent Proxy, and Fingerprint Shield designed for extreme privacy.*
 
-**Who Watches Watchers?** is an all-in-one transparent proxy and system lockdown tool. It forces 100% of your operating system's network traffic through the Tor network, spoofs your hardware footprint, and intercepts browser tracking APIs to make your machine indistinguishable from millions of others.
+**Created with ❤ by Grouvya (ofinilet)**
 
----
-
-## 🌟 Key Functionality
-
-1. **System-Wide Transparent Proxy**
-   - Automatically intercepts **all** outbound TCP/UDP traffic and forces it through the Tor network (`TransPort` and `DNSPort`).
-   - Completely blocks IPv6 to prevent DNS and IP leaks.
-   - Includes a strict **Kill Switch**: If Tor drops or crashes, the firewall locks down the machine, air-gapping the OS until Tor reconnects.
-
-2. **Advanced Snowflake Integration**
-   - Connects to Tor via the **Snowflake** anti-censorship bridge, disguising Tor traffic as standard WebRTC video-calling traffic to bypass Deep Packet Inspection (DPI) and strict firewalls.
-
-3. **Exhaustive Fingerprint Shield (Mitmproxy)**
-   - Deploys an invisible Man-in-the-Middle (MITM) proxy to inject a massive JavaScript anti-fingerprinting payload into every unencrypted webpage.
-   - Spoofs **57+ advanced browser tracking APIs**, including Canvas, WebGL, Audio Oscillators, Battery API, Sensors (Gyroscope), Media Formats, Timezone, User Agent, and more.
-   - Bypasses advanced trackers (like AmiUnique) by returning plausible, randomized data instead of your real hardware telemetry.
-
-4. **Hardware MAC Spoofing & PCIe Resets**
-   - Automatically randomizes your network interface MAC addresses before connecting to any network.
-   - Performs a **Raw PCIe Bus Reset** on network cards to clear zombie states and ensure MAC changes persist safely across router reconnections.
-   - Supports automated periodic MAC rotation.
-
-5. **Decoy Traffic Generator**
-   - Automatically generates randomized, harmless background web traffic through Tor to throw off ISP traffic analysis and prevent Tor circuits from going into Dormant mode.
-
-6. **DNS Blackholing & Anti-Telemetry**
-   - Implements the StevenBlack hosts file to natively sinkhole telemetry, tracking, and ad domains at the system level.
+**Who Watches Watchers?** is an all-in-one privacy framework. Unlike standard Tor browsers that only protect web traffic within a single window, this application implements a **system-wide transparent proxy**. It forces 100% of your operating system's network traffic through the Tor network, violently spoofs your hardware footprint, and intercepts tracking APIs to make your machine completely untraceable.
 
 ---
 
-## 🛠️ Installation
+## 🌟 Core Architecture & Functionality
+
+### 1. System-Wide Transparent Proxy (nftables)
+- **100% Traffic Redirection:** The engine dynamically compiles and applies `nftables` rules to intercept **all** outbound TCP and UDP traffic across your entire OS, forcing it through Tor's `TransPort` (Port 9040) and `DNSPort` (Port 9053). 
+- **IPv6 Blackholing:** IPv6 traffic is completely dropped at the kernel level (`net.ipv6.conf.all.disable_ipv6=1` and `nftables` reject rules) to prevent IP leakage, which is a common vulnerability in standard VPN setups.
+- **Air-Gapped Kill Switch:** A background Python thread constantly monitors the health of the Tor daemon (`systemctl is-active tor`). If Tor crashes, stalls, or drops the connection, the Kill Switch instantly triggers. It leaves the strict firewall rules in place, effectively air-gapping the system and preventing any clearnet traffic from leaking out.
+
+### 2. Advanced Snowflake Integration (Anti-Censorship)
+- Instead of connecting directly to Tor entry guards (which are easily identifiable and blocked by authoritarian regimes or strict corporate firewalls), the engine connects via the **Snowflake** client plugin.
+- Snowflake disguises your Tor traffic as standard WebRTC video-calling traffic, bouncing it through a constantly shifting pool of temporary volunteer proxies. This easily defeats Deep Packet Inspection (DPI).
+
+### 3. Exhaustive Fingerprint Shield (Mitmproxy)
+This is the crown jewel of the anonymity engine. The shield deploys an invisible Man-in-the-Middle (MITM) proxy using `mitmdump`. The firewall dynamically redirects all HTTP/HTTPS traffic (Ports 80 & 443) to this proxy before it enters the Tor network. The proxy injects a massive, highly sophisticated JavaScript payload into every webpage you visit.
+
+**Intercepted & Spoofed APIs (57+ vectors covered):**
+- **Canvas & WebGL:** Spoofs `HTMLCanvasElement.getContext`, `toDataURL`, `getImageData`, and adds microscopic noise to image rendering. WebGL vendor strings, shader precision (`getShaderPrecisionFormat`), and supported extensions are randomized to mask your real GPU hardware.
+- **AudioContext & Formats:** Randomizes oscillator wave generation and spoof checks for obscure media formats (`flac`, `vp9`) via `HTMLMediaElement.canPlayType`.
+- **Hardware Sensors & Battery:** Intercepts `navigator.getBattery()` with a fake, static Promise. `DeviceMotionEvent` and `DeviceOrientationEvent` are silenced to prevent physical gyroscope profiling.
+- **Media Devices & Network:** `navigator.mediaDevices.enumerateDevices` returns generic, fake hardware. `navigator.connection` is spoofed to report randomized 4G/WiFi data.
+- **Navigator & Timezone:** User Agent, Platform, Device Memory, Hardware Concurrency, and Timezone offsets are overridden and held static per session to prevent rapid-fire detection.
+
+### 4. Hardware MAC Spoofing & Persistence
+- Automatically randomizes the MAC addresses of all physical and wireless network interfaces (e.g., `eth0`, `wlan0`) using `macchanger` before any network connection is established.
+- **Raw PCIe Bus Reset:** Standard MAC spoofing often leaves Wi-Fi cards in a "zombie" state where they refuse to authenticate with routers. This engine dynamically locates the PCI address of your network cards and triggers a hardware-level bus reset via `sysfs` (`/sys/bus/pci/devices/.../reset`), ensuring the spoofed MAC persists flawlessly.
+
+### 5. DNS Blackholing & Traffic Obfuscation
+- **StevenBlack Hosts:** Native system-level ad, tracking, and malware domain blocking via the comprehensive StevenBlack host list.
+- **Decoy Traffic Generator:** A background bash daemon occasionally curls random popular Wikipedia and news articles through a hidden SOCKS5 proxy (`127.0.0.1:9050`). This adds noise to your traffic pattern, disrupting ISP traffic analysis and preventing Tor circuits from going Dormant.
+
+---
+
+## 🛠️ Installation & Setup
 
 ### Prerequisites
-- Debian-based OS (Parrot OS, Kali, Ubuntu, Debian)
-- `sudo` privileges
+- A Debian-based Linux distribution (Parrot OS, Kali Linux, Ubuntu, Debian).
+- `sudo` privileges (Root access is strictly required to modify kernel parameters and `nftables`).
 
-### Setup Instructions
-1. Navigate to the directory containing the installer script.
-2. Run the automated installer:
+### Quick Install
+1. Open a terminal in the directory containing the installer.
+2. Run the automated deployment script:
    ```bash
    sudo ./install.sh
    ```
-3. The script will automatically resolve dependencies, install Tor, generate local Certificates for the Fingerprint Shield, and configure the firewall.
-4. Once completed, a graphical dashboard (`anonshield`) will be available.
+3. The script will automatically install Tor, python3-stem, mitmproxy, generate local CA Certificates, and extract the GUI dashboard.
 
 ---
 
-## 🚀 Usage
+## 🚀 Using the Dashboard
 
-You can launch the dashboard anywhere by opening a terminal and typing:
+Launch the application globally by opening a terminal and running:
 ```bash
 sudo anonshield
 ```
-From the GUI, you can:
-- **Start Shield:** Bootstraps Tor, spoofs MACs, and applies the transparent proxy firewall.
-- **Stop Shield:** Removes the firewall, un-spoofs MACs, and restores direct internet access.
-- **Rotate Identity:** Forces Tor to build a brand new circuit, changing your external IP.
-- **Panic Button:** Immediately shreds the cache and memory, and violently kills network interfaces in case of emergency.
+
+**Dashboard Controls:**
+- **Start Shield:** Begins the sequence: MAC Spoofing -> PCIe Reset -> Tor Bootstrap -> Fingerprint Proxy Initialization -> Firewall Lockdown.
+- **Stop Shield:** Carefully dismantles the firewall, restores your original MAC addresses, and reverts your DNS settings to their default clearnet configuration.
+- **Rotate Identity:** Sends a `NEWNYM` signal to the Tor control port, forcing Tor to shred the current circuit and issue you a brand new external IP address.
+- **Panic Wipe:** An emergency button that instantly shreds memory caches, drops all network connections, and leaves the firewall in a permanent lockdown state until you reboot the system.
 
 ---
 
-## 💻 Using in a Virtual Machine (VM)
+## 💻 Virtual Machine (VM) specific guidelines
 
-If you are running Who Watches Watchers? inside a Virtual Machine (like VirtualBox, VMware, or KVM), you must be aware of the following network configurations:
+If you are deploying "Who Watches Watchers?" inside a Virtual Machine (VirtualBox, VMware, KVM/QEMU), the hypervisor's virtual networking stack introduces complications. **You must follow these rules:**
 
-1. **MAC Spoofing Restrictions:**
-   - Hypervisors often strictly enforce the MAC addresses of virtual adapters. 
-   - **VirtualBox:** Go to Settings -> Network -> Advanced -> **Promiscuous Mode**, and set it to **Allow All**. If this is not set, MAC spoofing will disconnect you from the internet because the hypervisor will drop packets from the spoofed MAC.
-   - **VMware:** You may need to edit the `.vmx` file or adjust vSwitch security policies to allow MAC address changes, otherwise the virtual adapter will silently drop traffic.
+1. **MAC Spoofing Restrictions (Crucial):**
+   - Hypervisors usually enforce strict MAC address policies to prevent ARP spoofing on the host network.
+   - **VirtualBox:** You must go to VM Settings -> Network -> Advanced -> **Promiscuous Mode**, and set it to **Allow All**. If you do not do this, MAC spoofing will succeed in Linux, but the hypervisor will silently drop all packets leaving the VM, resulting in zero internet connectivity.
+   - **VMware:** You may need to edit your virtual switch security settings to allow "MAC Address Changes" and "Forged Transmits".
 
 2. **Network Adapter Types:**
-   - **NAT (Recommended):** Uses the host machine's connection securely. The VM's traffic is forced through Tor *before* leaving the VM.
-   - **Bridged:** Gives the VM its own IP on the local network. MAC spoofing is more effective here but requires Promiscuous Mode enabled.
+   - **NAT (Network Address Translation):** This is the **recommended** mode. The VM acts as an isolated sandbox. The application forces traffic into Tor, and the host machine only sees encrypted Tor traffic.
+   - **Bridged Adapter:** Exposes the VM directly to your local router. MAC spoofing is highly effective here, but hypervisor Promiscuous Mode is absolutely required.
 
-3. **Time Sync:**
-   - The script disables system time-sync while active to prevent timing attacks. VM hypervisors sometimes forcefully sync the guest clock with the host. Ensure "Time Synchronization" via VMware Tools / VBox Guest Additions is **disabled** while the shield is active for maximum anonymity.
+3. **Time Synchronization Leaks:**
+   - The application intentionally disables `systemd-timesyncd` because hyper-accurate system clocks can be used for timing attacks.
+   - However, VM software (like VMware Tools or VirtualBox Guest Additions) often forces the VM clock to sync with the host OS in the background. **Disable Host-to-Guest time synchronization** in your hypervisor settings to maximize anonymity.
 
 ---
 
-## 🗑️ Uninstallation
+## 🗑️ Complete Uninstallation
 
-If you wish to completely remove Who Watches Watchers?, restore your original DNS, revert all firewall configurations, and delete the background services, simply run:
+The application is designed to be cleanly removable without permanently damaging your network configuration. 
+
+To completely uninstall the proxy, restore your original DNS resolvers, revert all `nftables` firewall rules, delete the CA certificates, and remove all background decoy services, execute:
 
 ```bash
 sudo ./install.sh --uninstall
 ```
 
-This will safely roll back the entire system to its default state and delete the application.
+*Note: You do not need to manually fix your network after uninstallation; the `--uninstall` flag handles the complete rollback of all modified kernel and system parameters.*
