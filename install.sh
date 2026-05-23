@@ -99,13 +99,13 @@ do_install() {
         PM="apt-get"
         export DEBIAN_FRONTEND=noninteractive
         apt-get update -qq
-        apt-get install -y -qq tor macchanger nftables python3-rich python3-tk polkitd python3-pip python3-venv python3-stem obfs4proxy libnotify-bin gir1.2-ayatanaappindicator3-0.1 libayatana-appindicator3-1 > /dev/null
+        apt-get install -y -qq tor macchanger nftables python3-rich python3-tk polkitd python3-pip python3-venv python3-stem obfs4proxy libnotify-bin gir1.2-ayatanaappindicator3-0.1 libayatana-appindicator3-1 bubblewrap privoxy > /dev/null
     elif command -v dnf >/dev/null 2>&1; then
         PM="dnf"
-        dnf install -y -q tor macchanger nftables python3-rich python3-tkinter polkit pip python3-stem obfs4 libnotify libappindicator-gtk3 > /dev/null
+        dnf install -y -q tor macchanger nftables python3-rich python3-tkinter polkit pip python3-stem obfs4 libnotify libappindicator-gtk3 bubblewrap privoxy > /dev/null
     elif command -v pacman >/dev/null 2>&1; then
         PM="pacman"
-        pacman -Sy --noconfirm --needed tor macchanger nftables python-rich tk python-pip python-stem obfs4proxy libnotify libappindicator-gtk3 > /dev/null
+        pacman -Sy --noconfirm --needed tor macchanger nftables python-rich tk python-pip python-stem obfs4proxy libnotify libappindicator-gtk3 bubblewrap privoxy > /dev/null
     else
         echo -e "${RED}✗${NC} Unsupported package manager. Please install dependencies manually."
         exit 1
@@ -137,7 +137,27 @@ do_install() {
     mkdir -p "$CONF_DIR"
     mkdir -p "$STATE_DIR"
     chmod 700 "$STATE_DIR"
+    chmod 700 "$STATE_DIR"
     echo -e "  ${GREEN}✓${NC} Created $APP_DIR, $CONF_DIR, and secure state directory."
+
+    # Create basic Privoxy config
+    cat << 'EOF' > "$CONF_DIR/privoxy.conf"
+listen-address  127.0.0.1:8118
+forward-socks5t / 127.0.0.1:9050 .
+toggle  1
+enable-remote-toggle  0
+enable-remote-http-toggle  0
+enable-edit-actions 0
+enforce-blocks 0
+buffer-limit 4096
+forwarded-connect-retries  0
+accept-intercepted-requests 0
+allow-cgi-request-crunching 0
+split-large-forms 0
+keep-alive-timeout 5
+tolerate-pipelining 1
+socket-timeout 300
+EOF
 
     # 4.5 Create Bypass Group for Split Tunneling
     if ! getent group anonshield-bypass >/dev/null; then
@@ -172,6 +192,7 @@ VirtualAddrNetworkIPv4 10.192.0.0/10
 AutomapHostsOnResolve 1
 TransPort 9040
 DNSPort 9053
+SOCKSPort 9050
 ControlPort 9051
 CookieAuthentication 1
 # --- END ANONSHIELD CONFIGURATION ---
@@ -494,6 +515,8 @@ table inet anonshield {{
             nft_conf += f'        meta skgid {gid_match} accept\n'
             
         nft_conf += f"""        meta nfproto ipv6 reject
+        tcp dport 853 reject
+        udp dport 853 reject
         oifname "lo" accept
         ip daddr 127.0.0.0/8 accept
 """
@@ -734,7 +757,8 @@ table inet anonshield {{
             # Shell-escape command args to prevent injection when passed via -c
             import shlex
             safe_cmd = shlex.join(cmd_args)
-            subprocess.run(["ip", "netns", "exec", ns_name, "su", "-", user, "-c", safe_cmd])
+            bwrap_cmd = f"bwrap --dev-bind / / --tmpfs /sys --tmpfs /proc --tmpfs /home --setenv HTTP_PROXY http://127.0.0.1:8118 --setenv HTTPS_PROXY http://127.0.0.1:8118 {safe_cmd}"
+            subprocess.run(["ip", "netns", "exec", ns_name, "su", "-", user, "-c", bwrap_cmd])
             
         finally:
             console_print("[bold cyan]🧹 Cleaning up sandbox...[/bold cyan]")
@@ -811,10 +835,22 @@ table inet anonshield {{
             except Exception as e:
                 console_print(f"[red]Failed to spoof MAC addresses: {e}[/red]")
                 
-        # 2. Boot Tor Daemon
-        console_print("[bold cyan]🔄 Restarting Tor service daemon to establish a fresh connection...[/bold cyan]")
+        # 2. Boot Tor Daemon & Privoxy
+        console_print("[bold cyan]🔄 Restarting Tor and Privoxy services...[/bold cyan]")
         self.manage_tor_service("restart")
+        subprocess.run(["systemctl", "restart", "privoxy"], capture_output=True)
         
+        # 2.5 Hostname Spoofing and IPv6 Disabling
+        try:
+            with open("/etc/hostname", "r") as f:
+                self.original_hostname = f.read().strip()
+            subprocess.run(["hostnamectl", "set-hostname", "amnesic"], check=False)
+            subprocess.run(["sysctl", "-w", "net.ipv6.conf.all.disable_ipv6=1"], check=False)
+            subprocess.run(["sysctl", "-w", "net.ipv6.conf.default.disable_ipv6=1"], check=False)
+            console_print("[green]✓ Hostname spoofed and IPv6 disabled.[/green]")
+        except Exception as e:
+            console_print(f"[yellow]⚠️ Failed to configure advanced network masking: {e}[/yellow]")
+
         # 3. Wait for Tor circuit bootstrap
         is_terminal = hasattr(sys.stdout, 'isatty') and sys.stdout.isatty()
         
@@ -942,9 +978,17 @@ table inet anonshield {{
         else:
             print("=== WHO WATCHES WATCHERS? - DEACTIVATING ANONYMITY ENGINE ===")
         
-        console_print("[bold cyan]🔌 Restoring default system DNS configurations...[/bold cyan]")
+        console_print("[bold cyan]🔌 Restoring default system DNS configurations and Hostname...[/bold cyan]")
         # self.configure_systemd_resolved(enable=False)
-        console_print("[green]✓ DNS settings restored.[/green]")
+        try:
+            if hasattr(self, 'original_hostname') and self.original_hostname:
+                subprocess.run(["hostnamectl", "set-hostname", self.original_hostname], check=False)
+            subprocess.run(["sysctl", "-w", "net.ipv6.conf.all.disable_ipv6=0"], check=False)
+            subprocess.run(["sysctl", "-w", "net.ipv6.conf.default.disable_ipv6=0"], check=False)
+            subprocess.run(["systemctl", "stop", "privoxy"], capture_output=True)
+        except Exception:
+            pass
+        console_print("[green]✓ DNS, Hostname, and IPv6 settings restored.[/green]")
         
         console_print("[bold cyan]🧱 Removing transparent proxy firewall rules and kill-switch...[/bold cyan]")
         self.cleanup_iptables_rules()
@@ -956,6 +1000,28 @@ table inet anonshield {{
         self.bw_listening = False
         self.send_notification("Who Watches Watchers? Offline", "Transparent proxy disabled. Connection restored to clearnet.")
         console_print("[bold green]✓ Who Watches Watchers? has been completely deactivated. Your connection is back to default.[/bold green]")
+
+    def panic_wipe(self):
+        self.check_root()
+        console_print("[bold red]🚨 EMERGENCY PANIC INITIATED 🚨[/bold red]")
+        subprocess.run(["nft", "flush", "ruleset"], capture_output=True)
+        subprocess.run(["nft", "add", "table", "inet", "panic"], capture_output=True)
+        subprocess.run(["nft", "add", "chain", "inet", "panic", "input", "{ type filter hook input priority 0; policy drop; }"], capture_output=True)
+        subprocess.run(["nft", "add", "chain", "inet", "panic", "output", "{ type filter hook output priority 0; policy drop; }"], capture_output=True)
+        subprocess.run(["nft", "add", "chain", "inet", "panic", "forward", "{ type filter hook forward priority 0; policy drop; }"], capture_output=True)
+        subprocess.run(["systemctl", "stop", "tor"], capture_output=True)
+        subprocess.run(["systemctl", "stop", "privoxy"], capture_output=True)
+        if os.path.exists(STATE_FILE):
+            subprocess.run(["shred", "-u", STATE_FILE], capture_output=True)
+        try:
+            with open("/proc/sys/vm/drop_caches", "w") as f:
+                f.write("3\n")
+            console_print("[bold red]✓ Memory caches wiped.[/bold red]")
+        except Exception:
+            pass
+        console_print("[bold red]System locked down. Reboot required to restore networking.[/bold red]")
+        sys.exit(1)
+
 
     def print_status(self):
         is_root = os.geteuid() == 0
@@ -1601,6 +1667,11 @@ class AnonShieldGUI:
         )
         self.btn_stop.pack(fill="x", pady=5)
 
+        self.btn_panic = self.create_flat_button(
+            actions_card, "🚨 EMERGENCY PANIC WIPE", "#FF0000", self.on_panic
+        )
+        self.btn_panic.pack(fill="x", pady=(15, 5))
+
         self.btn_check_tor = self.create_flat_button(
             actions_card, "🌐 Check Tor Connection", "#3B82F6", self.on_check_tor
         )
@@ -1929,6 +2000,18 @@ class AnonShieldGUI:
             messagebox.showinfo("Who Watches Watchers?", "Who Watches Watchers? Transparent Proxy is already active.")
             return
 
+        import socket
+        def check_network():
+            try:
+                socket.create_connection(("1.1.1.1", 53), timeout=2)
+                return True
+            except OSError:
+                return False
+
+        if not check_network():
+            messagebox.showwarning("Network Warning", "No active internet connection detected. Who Watches Watchers? may not function correctly until you connect to a network.")
+
+
         self.set_controls_state(False)
         self.console_widget.configure(state='normal')
         self.console_widget.delete('1.0', tk.END)
@@ -1976,6 +2059,10 @@ class AnonShieldGUI:
         if self._action_running: return
         if not self.shield.is_anonshield_active():
             messagebox.showerror("Error", "Start Who Watches Watchers? anonymization first before requesting a new circuit.")
+
+    def on_panic(self):
+        if messagebox.askyesno("EMERGENCY PANIC", "Are you sure? This will drop memory caches, kill the connection, and shred state files. All network traffic will be blocked until reboot."):
+            threading.Thread(target=self.shield.panic_wipe, daemon=True).start()
             return
 
         self.set_controls_state(False)
