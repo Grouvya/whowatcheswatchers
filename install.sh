@@ -74,6 +74,18 @@ try:
         subprocess.run(["ip", "link", "set", "dev", iface, "down"], capture_output=True)
         res = subprocess.run(["macchanger", "-m", orig_mac, iface],
                              capture_output=True, text=True)
+        try:
+            import os, time
+            pci_path = os.readlink(f"/sys/class/net/{iface}/device")
+            pci_id = os.path.basename(pci_path)
+            with open(f"/sys/bus/pci/devices/{pci_id}/remove", "w") as f:
+                f.write("1")
+            time.sleep(1)
+            with open("/sys/bus/pci/rescan", "w") as f:
+                f.write("1")
+            time.sleep(2)
+        except Exception:
+            pass
         subprocess.run(["ip", "link", "set", "dev", iface, "up"], capture_output=True)
         if res.returncode == 0:
             print(f"      ✓ {iface} restored → {orig_mac}")
@@ -766,6 +778,18 @@ class AnonShield:
                 console_print(f"  • Restoring [bold]{iface}[/bold] to {orig_mac}...", "cyan")
                 subprocess.run(["ip", "link", "set", "dev", iface, "down"], capture_output=True, check=False)
                 res = subprocess.run(["macchanger", "-m", orig_mac, iface], capture_output=True, check=False)
+                try:
+                    pci_path = os.readlink(f"/sys/class/net/{iface}/device")
+                    pci_id = os.path.basename(pci_path)
+                    console_print(f"    [yellow]Performing Raw PCIe Bus Reset on {pci_id}...[/yellow]")
+                    with open(f"/sys/bus/pci/devices/{pci_id}/remove", "w") as f:
+                        f.write("1")
+                    time.sleep(1)
+                    with open("/sys/bus/pci/rescan", "w") as f:
+                        f.write("1")
+                    time.sleep(2)
+                except Exception:
+                    pass
                 subprocess.run(["ip", "link", "set", "dev", iface, "up"], capture_output=True, check=False)
                 if res.returncode != 0:
                     failed.append(iface)
@@ -1810,15 +1834,21 @@ class FingerprintRandomizer:
             
             Object.defineProperty(navigator, 'userAgent', {get: () => uas[idx]});
             Object.defineProperty(navigator, 'platform', {get: () => platforms[idx]});
-            Object.defineProperty(navigator, 'hardwareConcurrency', {get: () => [2,4,8,16,32][getRandInt(0,4)]});
-            Object.defineProperty(navigator, 'deviceMemory', {get: () => [4,8,16,32,64][getRandInt(0,4)]});
-            Object.defineProperty(navigator, 'language', {get: () => ['en-US', 'en-GB', 'fr-FR', 'de-DE', 'es-ES'][getRandInt(0,4)]});
-            Object.defineProperty(navigator, 'languages', {get: () => [navigator.language, 'en']});
-            Object.defineProperty(navigator, 'doNotTrack', {get: () => [null, '1', 'unspecified'][getRandInt(0,2)]});
+            const hwC = [2,4,8,16,32][getRandInt(0,4)];
+            const dMem = [4,8,16,32,64][getRandInt(0,4)];
+            const lang = ['en-US', 'en-GB', 'fr-FR', 'de-DE', 'es-ES'][getRandInt(0,4)];
+            const dnt = [null, '1', 'unspecified'][getRandInt(0,2)];
+            
+            Object.defineProperty(navigator, 'hardwareConcurrency', {get: () => hwC});
+            Object.defineProperty(navigator, 'deviceMemory', {get: () => dMem});
+            Object.defineProperty(navigator, 'language', {get: () => lang});
+            Object.defineProperty(navigator, 'languages', {get: () => [lang, 'en']});
+            Object.defineProperty(navigator, 'doNotTrack', {get: () => dnt});
             
             // Additional Missing Navigator Properties
+            const vnd = ['Google Inc.', 'Apple Computer, Inc.', ''][getRandInt(0,2)];
             Object.defineProperty(navigator, 'webdriver', {get: () => false});
-            Object.defineProperty(navigator, 'vendor', {get: () => ['Google Inc.', 'Apple Computer, Inc.', ''][getRandInt(0,2)]});
+            Object.defineProperty(navigator, 'vendor', {get: () => vnd});
             Object.defineProperty(navigator, 'vendorSub', {get: () => ''});
             Object.defineProperty(navigator, 'product', {get: () => 'Gecko'});
             Object.defineProperty(navigator, 'productSub', {get: () => '20030107'});
@@ -1826,19 +1856,33 @@ class FingerprintRandomizer:
             Object.defineProperty(navigator, 'cookieEnabled', {get: () => true});
             
             // Spoof Timezone
-            const timezones = ['UTC', 'America/New_York', 'Europe/London', 'Asia/Tokyo'];
-            const tz = timezones[getRandInt(0, 3)];
+            const timezones = [
+                {tz: 'UTC', offset: 0},
+                {tz: 'America/New_York', offset: 300},
+                {tz: 'Europe/London', offset: 0},
+                {tz: 'Asia/Tokyo', offset: -540}
+            ];
+            const selectedTz = timezones[getRandInt(0, 3)];
+            
             const originalDateTimeFormat = Intl.DateTimeFormat;
             Intl.DateTimeFormat = function(...args) {
-                if (args.length === 0) args = [undefined, {}];
-                if (args.length === 1 && typeof args[0] === 'string') args = [args[0], {}];
-                if (!args[1].timeZone) args[1].timeZone = tz;
-                return new originalDateTimeFormat(...args);
+                let locale = args[0];
+                let options = args[1] || {};
+                if (!options.timeZone) {
+                    options.timeZone = selectedTz.tz;
+                }
+                return new originalDateTimeFormat(locale, options);
             };
             Intl.DateTimeFormat.prototype = originalDateTimeFormat.prototype;
             
+            const originalGetTimezoneOffset = Date.prototype.getTimezoneOffset;
+            Date.prototype.getTimezoneOffset = function() {
+                return selectedTz.offset;
+            };
+            
             // Spoof Plugins Length
-            Object.defineProperty(navigator, 'plugins', {get: () => ({ length: getRandInt(0, 5) })});
+            const plugLen = getRandInt(0, 5);
+            Object.defineProperty(navigator, 'plugins', {get: () => ({ length: plugLen })});
             
         })();
         """
