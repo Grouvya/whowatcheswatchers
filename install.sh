@@ -240,7 +240,6 @@ PYEOF
         sed -i '/# --- ANONSHIELD CONFIGURATION ---/,/# --- END ANONSHIELD CONFIGURATION ---/d' "$TORRC"
         systemctl restart tor
     fi
-
     echo -e "\n${BOLD}${GREEN}=======================================================${NC}"
     echo -e "${BOLD}${GREEN}   🗑️  UNINSTALLATION COMPLETE! SOFTWARE REMOVED.   ${NC}"
     echo -e "${BOLD}${GREEN}=======================================================${NC}"
@@ -248,6 +247,17 @@ PYEOF
 }
 
 do_install() {
+    echo -e "${BOLD}${BLUE}[1/7]${NC} Checking system requirements..."
+
+    # Kill any existing GUI instances to prevent runaway processes in memory
+    pkill -f anonshield_gui.py >/dev/null 2>&1 || true
+
+    # Check for root
+    if [ "$EUID" -ne 0 ]; then
+        echo -e "${RED}✗${NC} Please run as root."
+        exit 1
+    fi
+
     # 3. Update & Install Dependencies
     echo -e "${BOLD}${BLUE}[1/7]${NC} Installing system packages and dependencies..."
 
