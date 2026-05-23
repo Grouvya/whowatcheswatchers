@@ -2,7 +2,7 @@
 
 *An advanced, system-wide Anonymity Engine, Transparent Proxy, and Fingerprint Shield designed for extreme privacy.*
 
-**Created with ❤ by Grouvya (ofinilet)**
+**Created with ❤ by Grouvya**
 
 **Who Watches Watchers?** is an all-in-one privacy framework. Unlike standard Tor browsers that only protect web traffic within a single window, this application implements a **system-wide transparent proxy**. It forces 100% of your operating system's network traffic through the Tor network, violently spoofs your hardware footprint, and intercepts tracking APIs to make your machine completely untraceable.
 
