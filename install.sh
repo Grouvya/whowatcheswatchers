@@ -99,13 +99,13 @@ do_install() {
         PM="apt-get"
         export DEBIAN_FRONTEND=noninteractive
         apt-get update -qq
-        apt-get install -y -qq tor macchanger nftables python3-rich python3-tk polkitd python3-pip python3-venv python3-stem obfs4proxy libnotify-bin gir1.2-ayatanaappindicator3-0.1 libayatana-appindicator3-1 bubblewrap privoxy snowflake-client usbguard faketime apparmor-utils dnsmasq curl qemu-system-x86 i2pd gcc make git cryptsetup ecryptfs-utils > /dev/null
+        apt-get install -y -qq tor macchanger nftables python3-rich python3-tk polkitd python3-pip python3-venv python3-stem obfs4proxy libnotify-bin gir1.2-ayatanaappindicator3-0.1 libayatana-appindicator3-1 bubblewrap privoxy snowflake-client usbguard faketime apparmor-utils dnsmasq curl qemu-system-x86 i2pd gcc make git cryptsetup ecryptfs-utils secure-delete dnscrypt-proxy htpdate > /dev/null
     elif command -v dnf >/dev/null 2>&1; then
         PM="dnf"
-        dnf install -y -q tor macchanger nftables python3-rich python3-tkinter polkit pip python3-stem obfs4 libnotify libappindicator-gtk3 bubblewrap privoxy snowflake usbguard faketime apparmor-utils dnsmasq curl qemu-system-x86 i2pd gcc make git cryptsetup ecryptfs-utils > /dev/null
+        dnf install -y -q tor macchanger nftables python3-rich python3-tkinter polkit pip python3-stem obfs4 libnotify libappindicator-gtk3 bubblewrap privoxy snowflake usbguard faketime apparmor-utils dnsmasq curl qemu-system-x86 i2pd gcc make git cryptsetup ecryptfs-utils secure-delete dnscrypt-proxy htpdate > /dev/null
     elif command -v pacman >/dev/null 2>&1; then
         PM="pacman"
-        pacman -Sy --noconfirm --needed tor macchanger nftables python-rich tk python-pip python-stem obfs4proxy libnotify libappindicator-gtk3 bubblewrap privoxy snowflake usbguard faketime apparmor-utils dnsmasq curl qemu i2pd gcc make git cryptsetup ecryptfs-utils > /dev/null
+        pacman -Sy --noconfirm --needed tor macchanger nftables python-rich tk python-pip python-stem obfs4proxy libnotify libappindicator-gtk3 bubblewrap privoxy snowflake usbguard faketime apparmor-utils dnsmasq curl qemu i2pd gcc make git cryptsetup ecryptfs-utils secure-delete dnscrypt-proxy htpdate > /dev/null
     else
         echo -e "${RED}✗${NC} Unsupported package manager. Please install dependencies manually."
         exit 1
@@ -167,6 +167,52 @@ WantedBy=multi-user.target
 EOF
     systemctl daemon-reload
     systemctl enable --now kloak > /dev/null 2>&1
+    
+    # Setup Cryptographic RAM Wiping (sdmem)
+    cat << 'EOF' > /etc/systemd/system/anon-ram-wipe.service
+[Unit]
+Description=Cryptographic RAM Wiping
+DefaultDependencies=no
+Before=shutdown.target halt.target poweroff.target reboot.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/sdmem -f -ll
+TimeoutStartSec=600
+
+[Install]
+WantedBy=halt.target poweroff.target reboot.target
+EOF
+    systemctl daemon-reload
+    systemctl enable anon-ram-wipe.service > /dev/null 2>&1
+    
+    # Configure DNSCrypt-Proxy
+    cat << 'EOF' > /etc/dnscrypt-proxy/dnscrypt-proxy.toml
+listen_addresses = ['127.0.0.1:5300']
+server_names = ['cloudflare', 'google']
+force_tcp = true
+proxy = 'socks5://127.0.0.1:9050'
+EOF
+    systemctl enable dnscrypt-proxy > /dev/null 2>&1
+    
+    # NTP Location Scrubbing
+    systemctl disable --now systemd-timesyncd > /dev/null 2>&1
+    cat << 'EOF' > /etc/systemd/system/anon-htpdate.service
+[Unit]
+Description=Secure Tor-routed htpdate
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/sbin/htpdate -P 127.0.0.1:9050 -d -t www.google.com
+Restart=always
+RestartSec=600
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    systemctl daemon-reload
+    systemctl enable anon-htpdate.service > /dev/null 2>&1
     
     # Extreme sysctl kernel hardening
     echo -e "  ${BOLD}Applying Aggressive Kernel Hardening (sysctl)...${NC}"
