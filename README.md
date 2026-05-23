@@ -52,6 +52,13 @@ This is the crown jewel of the anonymity engine. The shield deploys an invisible
 - **DNSCrypt-Proxy:** Configures a fallback encrypted DNS resolver to prevent ISP DNS hijacking during bootstrap phases.
 - **Decoy Traffic Generator:** A background bash daemon occasionally curls random popular Wikipedia and news articles through a hidden SOCKS5 proxy (`127.0.0.1:9050`). This adds noise to your traffic pattern, disrupting ISP traffic analysis and preventing Tor circuits from going Dormant.
 
+### 10. Split Tunneling (Clearnet Bypass)
+- **App-Level Bypass:** Need to use an app that blocks Tor (like a banking app or Netflix)? The dashboard includes a "Split Tunnel" feature. It executes your chosen app under a special `anonshield-bypass` Linux user group that explicitly bypasses the `nftables` transparent proxy, securely routing only that app over your standard clearnet connection.
+- **LAN Bypass:** The firewall dynamically detects and allows local network ranges (e.g. `192.168.1.0/24`), ensuring you never lose access to your local router or printers when the shield goes up.
+
+### 11. Ephemeral Hidden Services (.onion)
+- **Instant .onion Hosting:** Directly from the GUI, you can select any local port (e.g., a python web server running on port 8080) and instantly expose it to the deep web. The script communicates with the Tor Control port to generate a temporary `ADD_ONION` address, allowing you to securely host files or chats anonymously without port forwarding.
+
 ---
 
 ## 🛠️ Installation & Setup
