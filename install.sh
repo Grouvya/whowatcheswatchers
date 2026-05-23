@@ -329,7 +329,7 @@ EOF
     
 
 cat << 'EOF_BUNDLE' > "/tmp/anonshield.py"
-#!/usr/bin/env python3
+#!/opt/anonshield/venv/bin/python3
 import os
 import sys
 import json
@@ -1478,7 +1478,7 @@ if __name__ == "__main__":
 EOF_BUNDLE
 
 cat << 'EOF_BUNDLE' > "/tmp/anonshield_gui.py"
-#!/usr/bin/env python3
+#!/opt/anonshield/venv/bin/python3
 import os
 import sys
 import shlex
