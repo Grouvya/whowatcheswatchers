@@ -279,7 +279,6 @@ AutomapHostsOnResolve 1
 TransPort 9040 IsolateDestAddr IsolateDestPort
 DNSPort 9053 IsolateDestAddr IsolateDestPort
 SOCKSPort 9050 IsolateDestAddr IsolateDestPort
-Socks5Proxy 127.0.0.1:4447
 ControlPort 9051
 ConnectionPadding 1
 ReducedConnectionPadding 0
@@ -294,6 +293,11 @@ EOF
     systemctl enable -q tor >/dev/null 2>&1
     systemctl restart tor >/dev/null 2>&1
     echo -e "  ${GREEN}✓${NC} Enabled and restarted Tor service daemon."
+    
+    # Enable and start i2pd
+    systemctl enable -q i2pd >/dev/null 2>&1
+    systemctl restart i2pd >/dev/null 2>&1
+    echo -e "  ${GREEN}✓${NC} Enabled and restarted I2P service daemon."
 
     # AppArmor Strict Confinement Profile
     echo -e "  ${GREEN}✓${NC} Generating AppArmor strict confinement profile..."
