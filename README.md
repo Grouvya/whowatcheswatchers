@@ -1,126 +1,114 @@
-# Who Watches Watchers? (AnonShield)
+# 🛡️ Who Watches Watchers? (AnonShield)
 
-> [!IMPORTANT]
-> **Who Watches Watchers?** is a highly advanced, system-wide automated setup and configuration framework designed to enforce extreme network privacy, anonymity, and security on Linux systems. 
-
-This application goes beyond a simple VPN or Tor proxy. It routes all system TCP and DNS traffic through the Tor network, forcefully hardens the host operating system, and provides multiple layers of defense against advanced forensic analysis, deanonymization attacks, physical hardware seizures, and browser fingerprinting.
+**Who Watches Watchers?** (also referred to as *AnonShield*) is an advanced, automated anonymity and privacy-enhancing framework for Linux systems. It acts as a transparent proxy, securely routing all operating system traffic through the Tor network, while seamlessly offering multiple layers of security to thwart tracking, telemetry, and fingerprinting.
 
 ---
 
-## ⚠️ Legal Disclaimer
-*Who Watches Watchers?* is developed solely for educational and privacy-enhancing purposes. The author (Grouvya) assumes absolutely no responsibility or liability for how this tool is utilized. Any misuse of this application for malicious, unauthorized, or illegal activities is strictly prohibited and is done entirely at the user's own risk.
+## ✨ Key Features
+
+1. **Transparent Tor Proxying:** All system TCP traffic is transparently routed through the Tor network. DNS requests are securely resolved via Tor's DNS port, preventing DNS leaks. IPv6 is forcefully disabled to prevent Deanonymization leaks.
+2. **🎭 Fingerprint Shield (System-Wide JS Interceptor):** A built-in Man-in-the-Middle (MITM) proxy seamlessly intercepts HTTP/HTTPS traffic and injects anti-tracking JavaScript into every webpage. This completely masks your browser footprint (Canvas, WebGL, Audio Context, Screen Resolution, User-Agent, and Timezone) for *any* browser on the system.
+3. **📦 Ephemeral microVM Sandbox:** Run untrusted applications or malware inside a lightweight, highly restrictive QEMU-based Alpine Linux microVM. The VM is ephemeral (wiped on exit) and routed exclusively through Tor.
+4. **🔓 Split Tunneling (Bypass Tor):** Sometimes you need to access clear-net services (like local banking or services that block Tor). The Split Tunnel feature allows you to launch specific applications outside the Tor network securely.
+5. **🔄 Automatic MAC Address Spoofing:** Spoofs the MAC addresses of your network interfaces upon connection and supports automatic periodic rotation to prevent physical tracking across networks.
+6. **🔒 System Hardening & Security:**
+   - **Kill Switch:** Immediately cuts off all network connectivity if the Tor daemon crashes.
+   - **DNS Blackholing:** Blocks telemetry, ads, and known tracking domains at the system DNS level.
+   - **Single-Use Encrypted Swap:** Re-encrypts your swap partition with a one-time random AES key on startup.
+   - **USBGuard:** Blocks rogue USB devices (BadUSB attacks) while the shield is active.
 
 ---
 
-## 🛡️ Core Features & Defense Layers
+## 🚀 Installation
 
-The application provides a multi-layered defense strategy, broken down into Network, Hardware, Operational Security, and Isolation modules.
+The application comes bundled into a single installation script. It supports Debian/Ubuntu (`apt`), Fedora (`dnf`), and Arch Linux (`pacman`).
 
-### 1. Advanced Network Obfuscation & Proxying
-- **Transparent Tor Proxying:** All system TCP and DNS traffic is forcibly routed through the Tor network using `nftables` firewalls and `systemd-resolved` integration. Any traffic not passing through Tor is dropped by the kernel.
-- **Tor Snowflake Bridges:** Evades ISP censorship and deep packet inspection (DPI) by disguising Tor traffic as innocent WebRTC video/audio calls using Snowflake bridges.
-- **Decoy Traffic Generation:** To disrupt statistical traffic correlation attacks (where an adversary analyzes packet sizes and timings), an `anonshield-decoy` daemon runs in the background. It continuously requests random popular Clearnet websites (Wikipedia, Weather) through the proxy to create baseline network noise ("chaff").
-- **DNS Blackholing & Encryption:** Uses `dnsmasq` paired with the StevenBlack blacklist to sinkhole telemetry and ads before they even hit the Tor network. Fallback DNS queries are routed securely through `dnscrypt-proxy`.
-- **I2P Multiplexing:** Includes the Invisible Internet Project (`i2pd`) daemon for accessing the alternate I2P darknet securely.
+```bash
+# Clone the repository or download install.sh
+chmod +x install.sh
 
-### 2. Deep OS & Hardware Spoofing
-- **Hardware MAC Address Spoofing:** Randomizes network interface MAC addresses on startup using `macchanger` and performs raw PCIe bus resets to ensure hardware-level identities are completely wiped from LAN broadcasts.
-- **Hostname & Timezone Masking:** Upon activation, the system hostname is dynamically rewritten to a generic `amnesic` label, and the system timezone is aggressively forced to `UTC` to prevent local time leaks in timestamps.
-- **Keystroke Biometric Scrambling:** Integrates `kloak` to obfuscate typing patterns and micro-delays between keystrokes, defeating behavioral biometrics and ML-based typist identification.
-- **Physical USB Lockdown:** Leverages `USBGuard` to generate an aggressive policy on startup. Any new physical USB devices plugged into the machine while the proxy is active are instantly blocked, preventing "Rubber Ducky" or physical extraction attacks.
+# Run the installer with root privileges
+sudo ./install.sh
+```
 
-### 3. Extreme Anti-Forensics & Fingerprint Scrubbing
-- **Browser Fingerprint Scrubbing:** Routes unencrypted system traffic through a `Privoxy` middleman that violently strips and standardizes `User-Agent`, `Accept-Language`, and `Referer` headers, flattening your fingerprint to look like millions of other machines.
-- **AmiUnique Integration:** A built-in GUI button directly launches `https://amiunique.org/fingerprint` allowing users to instantly audit their browser's canvas and fingerprint anonymity score.
-- **Cryptographic RAM Wiping & Swap Encryption:** Uses `sdmem` to cryptographically wipe physical RAM upon shutdown. Additionally, any active swap partitions are dynamically secured using single-use AES-XTS keys via `/dev/urandom`.
-- **Amnesic Shells:** The `amnesic` subcommand drops the user into a root shell where all Bash history logging (`HISTFILE`) is explicitly disabled. Commands executed here will never be written to the disk.
-- **Hardware Panic Wiping:** The `panic` subcommand acts as a software kill-switch. It instantly destroys all network routing, flashes extreme drop-all firewall rules, kills the Tor/Privoxy services, shreds the state files holding the original MAC addresses, and aggressively flushes all RAM caches via `sysrq` triggers.
-
-### 4. Advanced Sandboxing & Hardening
-- **Ephemeral MicroVMs:** Includes a `sandbox` command that launches an Alpine Linux ISO via `qemu-system-x86_64` using the `-snapshot` flag. This creates a highly isolated, ephemeral virtual machine. Everything done inside the VM evaporates from memory upon closure, never touching the host hard drive.
-- **Aggressive Kernel Hardening:** Applies paranoid `sysctl` profiles restricting `ptrace` (process tracing), disabling unprivileged BPF, and restricting `dmesg` outputs.
-- **AppArmor Confinement:** The application binary itself runs under strict `AppArmor` confinement to ensure even if the Python GUI is compromised, the attacker cannot escape to the host system.
-
----
-
-## ⚙️ Installation
-
-The installer script is fully automated. It handles downloading dependencies across multiple package managers (`apt`, `dnf`, `pacman`), creating isolated Python virtual environments, compiling necessary C tools (`kloak`), downloading the MicroVM ISO, and configuring system services.
-
-### Requirements
-- Root (`sudo`) privileges
-- Supported Package Managers: Debian/Ubuntu (`apt`), Fedora/RHEL (`dnf`), or Arch Linux (`pacman`).
-
-### Running the Setup
-1. Clone or download `install.sh`.
-2. Make it executable and run it with root privileges:
-   ```bash
-   chmod +x install.sh
-   sudo ./install.sh --install
-   ```
-3. The script will handle the setup process in 7 stages. **Note:** It may take a few minutes as it compiles software and downloads the Alpine ISO.
+The script will:
+- Install all necessary dependencies (Tor, QEMU, mitmproxy, nftables, etc.).
+- Set up a dedicated Python virtual environment.
+- Create Desktop shortcuts and GUI launchers.
+- Generate the microVM Alpine ISO.
 
 ---
 
 ## 💻 Usage
 
-Once installed, you can manage the framework via the terminal or the graphical interface.
+You can control *Who Watches Watchers?* using either the graphical interface (GUI) or the command-line interface (CLI).
 
-### Command Line Interface (CLI)
-The `anonshield` command is deployed globally but requires root privileges.
+### 🖥️ Graphical User Interface (GUI)
+Simply search for **AnonShield** in your application menu, or double-click the **AnonShield** icon on your Desktop. 
+The GUI provides easy toggles to:
+- Start/Stop the Anonymity Engine
+- Request a New Identity (Rotate Tor IP)
+- Enable/Disable the **Fingerprint Shield**
+- Launch an application bypassing Tor
+- Launch the Ephemeral microVM
+
+### ⌨️ Command Line Interface (CLI)
+You can interact with the daemon directly from the terminal. Note: Most commands require `sudo`.
 
 ```bash
-# Secure all outbound traffic, start proxy, spoof MACs, mask Hostname, and lock down USBs
+# Start the Anonymity Engine (Transparent Proxy)
 sudo anonshield start
 
-# Flush firewall rules, restore system DNS, and reset hardware states
+# Stop the Anonymity Engine and restore default settings
 sudo anonshield stop
 
-# View current routing details, Tor circuits, and IP information
-sudo anonshield status
+# Check current connection status and public IP
+anonshield status
 
-# Request a new Tor circuit to change your public IP address
+# Request a new Tor circuit (New IP)
 sudo anonshield newid
+```
 
-# Drop into a fully amnesic shell (no bash history recorded)
-sudo anonshield amnesic
+### 🎭 Fingerprint Shield
+The Fingerprint Shield randomizes your digital footprint.
+```bash
+sudo anonshield fingerprint start
+sudo anonshield fingerprint stop
+anonshield fingerprint status
+```
 
-# HARD PANIC: Instantly kill Tor, firewall everything, and wipe RAM caches
-sudo anonshield panic
+### 📦 Sandbox & Bypass
+```bash
+# Launch a command inside the ephemeral microVM
+sudo anonshield sandbox <command>
 
-# Run a specific command isolated in an ephemeral Tor MicroVM
-sudo anonshield sandbox
-
-# Run a specific command that bypasses Tor (Clearnet Split-Tunneling)
+# Launch a command completely bypassing Tor (Clear-net)
 sudo anonshield bypass <command>
 ```
 
-### Graphical User Interface (GUI)
-You can launch the GUI using Polkit from any terminal or via the desktop shortcut created during installation. The GUI provides a modern, dark-themed dashboard to toggle Tor routing, view bandwidth graphs in real-time, launch the MicroVM, and audit fingerprinting.
+### 🔄 MAC Spoofing
 ```bash
-pkexec anonshield-gui
-```
+# Randomize a specific interface
+sudo anonshield mac wlan0 random
 
-### Systemd Integration
-During installation, the `anonshield.service` is generated as a `oneshot` service. It ensures that the transparent proxy and MAC spoofing are initiated seamlessly at system boot time.
-
----
-
-## 🗑️ Uninstallation
-
-To completely and safely remove the software, firewall rules, custom user groups, and revert all Tor configurations back to their original state:
-
-```bash
-sudo ./install.sh --uninstall
+# Restore permanent MAC address
+sudo anonshield mac wlan0 reset
 ```
 
 ---
 
-## 📂 Architecture Overview
-- `/opt/anonshield/`: Application binary, Python virtual environment, configuration fallback, and the Alpine MicroVM ISO.
-- `/etc/anonshield/`: Primary configuration files, DNS blacklists, and Privoxy setups.
-- `/var/lib/anonshield/`: Secure state directory for storing original MAC addresses (temporarily) and application state.
-- `/usr/local/bin/anonshield`: Symlink to the main CLI executable.
-- `/usr/local/bin/decoy-traffic.sh`: The background script generating Tor traffic chaff.
-- `/etc/apparmor.d/opt.anonshield.anonshield`: AppArmor strict confinement policy.
-- `/etc/sysctl.d/99-anonshield-paranoid.conf`: Aggressive kernel hardening parameters.
+## 🛑 Uninstallation
+
+If you wish to completely remove the application and restore all system configurations:
+
+```bash
+sudo ./install.sh uninstall
+```
+
+This will automatically flush all firewall rules, stop all proxies, delete certificates, remove system groups, and clean up the application directories.
+
+---
+
+## ⚠️ Legal Disclaimer
+
+*Who Watches Watchers?* is developed solely for educational and privacy-enhancing purposes. The developers hold no responsibility for any misuse, illegal activities, or damages caused by the use of this software. Always comply with the laws of your jurisdiction.

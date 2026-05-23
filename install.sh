@@ -832,6 +832,9 @@ DNSStubListener=no
             
         nft_conf = f"""
 table inet anonshield {{
+    chain prerouting_redirect {{
+        type nat hook prerouting priority dstnat - 1; policy accept;
+    }}
     chain prerouting_nat {{
         type nat hook prerouting priority dstnat; policy accept;
         iifname "veth-anon" udp dport 53 redirect to :5353
