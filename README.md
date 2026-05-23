@@ -33,8 +33,23 @@ This is the crown jewel of the anonymity engine. The shield deploys an invisible
 - Automatically randomizes the MAC addresses of all physical and wireless network interfaces (e.g., `eth0`, `wlan0`) using `macchanger` before any network connection is established.
 - **Raw PCIe Bus Reset:** Standard MAC spoofing often leaves Wi-Fi cards in a "zombie" state where they refuse to authenticate with routers. This engine dynamically locates the PCI address of your network cards and triggers a hardware-level bus reset via `sysfs` (`/sys/bus/pci/devices/.../reset`), ensuring the spoofed MAC persists flawlessly.
 
-### 5. DNS Blackholing & Traffic Obfuscation
+### 5. Keystroke Biometric Scrambling (Kloak)
+- Compiles and runs `kloak` as a background daemon to obscure the timing of your keystrokes at the kernel level. This prevents advanced trackers from fingerprinting your unique typing rhythm and cadence.
+
+### 6. Extreme Kernel & Hardware Hardening
+- **Sysctl Lockdown:** Applies paranoid kernel parameters (`99-anonshield-paranoid.conf`) to disable TCP timestamps (prevents uptime tracking), restrict `dmesg`, disable unprivileged BPF, and enforce strict ptrace restrictions.
+- **USBGuard Lockdown:** Automatically blocks any new USB devices from connecting while the shield is active, preventing Rubber Ducky/BadUSB physical extraction attacks.
+- **AppArmor Sandboxing:** Enforces strict mandatory access control profiles on the core Python application to prevent privilege escalation.
+
+### 7. Secure Time Synchronization (HTPDate)
+- Traditional NTP requests operate over UDP and can leak your real IP or allow timing attacks. The engine disables `systemd-timesyncd` and replaces it with `htpdate`, syncing your system clock securely over encrypted HTTPS requests via the Tor network.
+
+### 8. Automated RAM Wiping (Secure-Delete)
+- Installs an `anon-ram-wipe.service` that triggers on system shutdown or reboot. It uses `sdmem` (from the `secure-delete` suite) to violently overwrite RAM, ensuring encryption keys and residual network traffic cannot be recovered via Cold Boot Attacks.
+
+### 9. DNS Blackholing & Traffic Obfuscation
 - **StevenBlack Hosts:** Native system-level ad, tracking, and malware domain blocking via the comprehensive StevenBlack host list.
+- **DNSCrypt-Proxy:** Configures a fallback encrypted DNS resolver to prevent ISP DNS hijacking during bootstrap phases.
 - **Decoy Traffic Generator:** A background bash daemon occasionally curls random popular Wikipedia and news articles through a hidden SOCKS5 proxy (`127.0.0.1:9050`). This adds noise to your traffic pattern, disrupting ISP traffic analysis and preventing Tor circuits from going Dormant.
 
 ---
