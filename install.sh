@@ -508,7 +508,8 @@ SOCKSPort 9050 IsolateDestAddr IsolateDestPort
 ControlPort 9051
 ConnectionPadding 1
 ReducedConnectionPadding 0
-CircuitBuildTimeout 10
+# Removed CircuitBuildTimeout 10 (Too aggressive for Snowflake)
+DormantClientTimeout 24 hours
 CookieAuthentication 1
 CookieAuthFileGroupReadable 1
 UseBridges 1
@@ -1448,6 +1449,15 @@ table inet anonshield {{
             self.restore_macs()
             return
 
+        # Start Fingerprint Shield IMMEDIATELY so port 443 redirection doesn't fail connection verification
+        try:
+            self.fp_randomizer = FingerprintRandomizer()
+            self.fp_randomizer.start()
+            fp_status = "Active (randomizing all browsers)"
+        except Exception as fp_e:
+            fp_status = f"Unavailable ({fp_e})"
+            self.fp_randomizer = None
+
         # 6. Verify Tor Routing Status
         tor_status = None
         last_error = "Connection timeout or circuit warm-up in progress"
@@ -1478,14 +1488,6 @@ table inet anonshield {{
                 time.sleep(sleep_interval)
                 
         if tor_status and tor_status.get("IsTor"):
-            # Auto-start Fingerprint Shield when Tor connection succeeds
-            try:
-                self.fp_randomizer = FingerprintRandomizer()
-                self.fp_randomizer.start()
-                fp_status = "Active (randomizing all browsers)"
-            except Exception as fp_e:
-                fp_status = f"Unavailable ({fp_e})"
-                self.fp_randomizer = None
             rprint(Panel.fit(
                 f"[bold green]✓ SUCCESS: YOUR CONNECTION IS SECURED BY TOR NETWORK![/bold green]\n\n"
                 f"  • [bold]External IP:[/bold] {tor_status.get('IP')}\n"
@@ -1883,6 +1885,115 @@ class FingerprintRandomizer:
             // Spoof Plugins Length
             const plugLen = getRandInt(0, 5);
             Object.defineProperty(navigator, 'plugins', {get: () => ({ length: plugLen })});
+            
+            // --- EXHAUSTIVE FINGERPRINT HOOKS ---
+            // 1. Spoof Battery API
+            if (navigator.getBattery) {
+                const bLevel = getRandInt(10, 100) / 100;
+                const bCharging = getRandInt(0, 1) === 1;
+                const fakeBattery = {
+                    level: bLevel,
+                    charging: bCharging,
+                    chargingTime: bCharging ? 0 : Infinity,
+                    dischargingTime: bCharging ? Infinity : getRandInt(1000, 10000),
+                    addEventListener: () => {}
+                };
+                navigator.getBattery = () => Promise.resolve(fakeBattery);
+            }
+
+            // 2. Spoof Media Devices (Microphones, Cameras)
+            if (navigator.mediaDevices && navigator.mediaDevices.enumerateDevices) {
+                const fakeDevices = [
+                    { kind: 'audioinput', deviceId: 'default', groupId: 'default', label: 'Default Audio Input' },
+                    { kind: 'videoinput', deviceId: 'default', groupId: 'default', label: 'Default Video Input' },
+                    { kind: 'audiooutput', deviceId: 'default', groupId: 'default', label: 'Default Audio Output' }
+                ];
+                navigator.mediaDevices.enumerateDevices = () => Promise.resolve(fakeDevices);
+            }
+
+            // 3. Spoof Video/Audio Formats (canPlayType)
+            const originalVideoCanPlayType = HTMLVideoElement.prototype.canPlayType;
+            HTMLVideoElement.prototype.canPlayType = function(type) {
+                if (type && type.includes('vp9')) return getRandInt(0,1) ? 'probably' : 'maybe';
+                return originalVideoCanPlayType.apply(this, arguments);
+            };
+            const originalAudioCanPlayType = HTMLAudioElement.prototype.canPlayType;
+            HTMLAudioElement.prototype.canPlayType = function(type) {
+                if (type && type.includes('flac')) return getRandInt(0,1) ? 'probably' : 'maybe';
+                return originalAudioCanPlayType.apply(this, arguments);
+            };
+
+            // 4. Spoof Permissions API
+            if (navigator.permissions && navigator.permissions.query) {
+                const originalQuery = navigator.permissions.query;
+                navigator.permissions.query = function(params) {
+                    return Promise.resolve({ state: 'prompt', onchange: null });
+                };
+            }
+
+            // 5. Expand WebGL (Shaders & Extensions)
+            const originalGetSupportedExtensions = WebGLRenderingContext.prototype.getSupportedExtensions;
+            WebGLRenderingContext.prototype.getSupportedExtensions = function() {
+                const exts = originalGetSupportedExtensions.apply(this) || [];
+                if (exts.length > 0) {
+                    const removeCount = getRandInt(1, 3);
+                    for (let i = 0; i < removeCount; i++) {
+                        exts.splice(getRandInt(0, exts.length - 1), 1);
+                    }
+                }
+                return exts;
+            };
+            const originalGetShaderPrecisionFormat = WebGLRenderingContext.prototype.getShaderPrecisionFormat;
+            WebGLRenderingContext.prototype.getShaderPrecisionFormat = function(shaderType, precisionType) {
+                const format = originalGetShaderPrecisionFormat.apply(this, arguments);
+                if (format) {
+                    format.precision += (getRandInt(0, 1) === 1 ? 1 : 0);
+                }
+                return format;
+            };
+
+            // 6. Hardware Sensors (Disable/Noise)
+            window.addEventListener('deviceorientation', e => e.stopPropagation(), true);
+            window.addEventListener('devicemotion', e => e.stopPropagation(), true);
+
+            // 7. Network Connection
+            if (navigator.connection) {
+                const rtt = [50, 100, 150, 200][getRandInt(0, 3)];
+                const dl = [1, 5, 10, 50][getRandInt(0, 3)];
+                const type = ['wifi', '4g'][getRandInt(0, 1)];
+                Object.defineProperty(navigator, 'connection', {
+                    get: () => ({ rtt, downlink: dl, effectiveType: type, saveData: false })
+                });
+            }
+
+            // 8. Keyboard Layout
+            if (navigator.keyboard && navigator.keyboard.getLayoutMap) {
+                navigator.keyboard.getLayoutMap = () => Promise.resolve(new Map([['KeyQ', 'q'], ['KeyW', 'w']]));
+            }
+
+            // 9. Font Measurement Noise (Static per element to avoid instability)
+            const originalOffsetWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetWidth');
+            if (originalOffsetWidth) {
+                Object.defineProperty(HTMLElement.prototype, 'offsetWidth', {
+                    get: function() {
+                        const w = originalOffsetWidth.get.call(this);
+                        if (!w) return w;
+                        const seed = (this.textContent || '').length;
+                        return seed % 3 === 1 ? w + 1 : w;
+                    }
+                });
+            }
+            const originalOffsetHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetHeight');
+            if (originalOffsetHeight) {
+                Object.defineProperty(HTMLElement.prototype, 'offsetHeight', {
+                    get: function() {
+                        const h = originalOffsetHeight.get.call(this);
+                        if (!h) return h;
+                        const seed = (this.textContent || '').length;
+                        return seed % 3 === 2 ? h + 1 : h;
+                    }
+                });
+            }
             
         })();
         """
