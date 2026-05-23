@@ -99,13 +99,13 @@ do_install() {
         PM="apt-get"
         export DEBIAN_FRONTEND=noninteractive
         apt-get update -qq
-        apt-get install -y -qq tor macchanger nftables python3-rich python3-tk polkitd python3-pip python3-venv python3-stem obfs4proxy libnotify-bin gir1.2-ayatanaappindicator3-0.1 libayatana-appindicator3-1 bubblewrap privoxy > /dev/null
+        apt-get install -y -qq tor macchanger nftables python3-rich python3-tk polkitd python3-pip python3-venv python3-stem obfs4proxy libnotify-bin gir1.2-ayatanaappindicator3-0.1 libayatana-appindicator3-1 bubblewrap privoxy snowflake-client usbguard faketime apparmor-utils > /dev/null
     elif command -v dnf >/dev/null 2>&1; then
         PM="dnf"
-        dnf install -y -q tor macchanger nftables python3-rich python3-tkinter polkit pip python3-stem obfs4 libnotify libappindicator-gtk3 bubblewrap privoxy > /dev/null
+        dnf install -y -q tor macchanger nftables python3-rich python3-tkinter polkit pip python3-stem obfs4 libnotify libappindicator-gtk3 bubblewrap privoxy snowflake usbguard faketime apparmor-utils > /dev/null
     elif command -v pacman >/dev/null 2>&1; then
         PM="pacman"
-        pacman -Sy --noconfirm --needed tor macchanger nftables python-rich tk python-pip python-stem obfs4proxy libnotify libappindicator-gtk3 bubblewrap privoxy > /dev/null
+        pacman -Sy --noconfirm --needed tor macchanger nftables python-rich tk python-pip python-stem obfs4proxy libnotify libappindicator-gtk3 bubblewrap privoxy snowflake usbguard faketime apparmor-utils > /dev/null
     else
         echo -e "${RED}✗${NC} Unsupported package manager. Please install dependencies manually."
         exit 1
@@ -194,6 +194,9 @@ TransPort 9040
 DNSPort 9053
 SOCKSPort 9050
 ControlPort 9051
+ConnectionPadding 1
+ReducedConnectionPadding 0
+CircuitBuildTimeout 10
 CookieAuthentication 1
 # --- END ANONSHIELD CONFIGURATION ---
 EOF
@@ -204,6 +207,31 @@ EOF
     systemctl enable -q tor >/dev/null 2>&1
     systemctl restart tor >/dev/null 2>&1
     echo -e "  ${GREEN}✓${NC} Enabled and restarted Tor service daemon."
+
+    # AppArmor Strict Confinement Profile
+    echo -e "  ${GREEN}✓${NC} Generating AppArmor strict confinement profile..."
+    cat << 'EOF' > /etc/apparmor.d/opt.anonshield.anonshield
+#include <tunables/global>
+
+/opt/anonshield/anonshield {
+  #include <abstractions/base>
+  #include <abstractions/python>
+  #include <abstractions/nameservice>
+
+  /opt/anonshield/** mrw,
+  /var/lib/anonshield/** mrw,
+  /etc/anonshield/** r,
+  
+  /usr/bin/python* ix,
+  /usr/bin/bwrap ix,
+  /usr/bin/nft ix,
+  /usr/bin/systemctl ix,
+  /bin/su ix,
+  /bin/sh ix,
+  /usr/sbin/macchanger ix,
+}
+EOF
+    apparmor_parser -r /etc/apparmor.d/opt.anonshield.anonshield >/dev/null 2>&1
 
     # 6. Extract and Install Application Files
     echo -e "\n${BOLD}${BLUE}[4/7]${NC} Extracting bundled code resources..."
@@ -708,6 +736,24 @@ table inet anonshield {{
         except Exception:
             return False
 
+    def set_snowflake(self, enable):
+        try:
+            with Controller.from_port(port=self.config["tor_control_port"]) as controller:
+                controller.authenticate()
+                if enable:
+                    controller.set_options({
+                        "UseBridges": "1",
+                        "ClientTransportPlugin": "snowflake exec /usr/bin/snowflake-client"
+                    })
+                else:
+                    controller.set_options({
+                        "UseBridges": "0",
+                        "ClientTransportPlugin": ""
+                    })
+                return True
+        except Exception:
+            return False
+
     def set_custom_bridges(self, bridge_lines):
         try:
             with Controller.from_port(port=self.config["tor_control_port"]) as controller:
@@ -757,7 +803,7 @@ table inet anonshield {{
             # Shell-escape command args to prevent injection when passed via -c
             import shlex
             safe_cmd = shlex.join(cmd_args)
-            bwrap_cmd = f"bwrap --dev-bind / / --tmpfs /sys --tmpfs /proc --tmpfs /home --setenv HTTP_PROXY http://127.0.0.1:8118 --setenv HTTPS_PROXY http://127.0.0.1:8118 {safe_cmd}"
+            bwrap_cmd = f"faketime -f '-0.3s' bwrap --dev-bind / / --tmpfs /sys --tmpfs /proc --tmpfs /home --setenv HTTP_PROXY http://127.0.0.1:8118 --setenv HTTPS_PROXY http://127.0.0.1:8118 {safe_cmd}"
             subprocess.run(["ip", "netns", "exec", ns_name, "su", "-", user, "-c", bwrap_cmd])
             
         finally:
@@ -850,6 +896,14 @@ table inet anonshield {{
             console_print("[green]✓ Hostname spoofed and IPv6 disabled.[/green]")
         except Exception as e:
             console_print(f"[yellow]⚠️ Failed to configure advanced network masking: {e}[/yellow]")
+
+        # 2.6 Physical Lockdown (USBGuard)
+        try:
+            subprocess.run(["sh", "-c", "usbguard generate-policy > /etc/usbguard/rules.conf"], check=False)
+            subprocess.run(["systemctl", "restart", "usbguard"], check=False)
+            console_print("[green]✓ USBGuard physical lockdown active. New devices will be blocked.[/green]")
+        except Exception as e:
+            console_print(f"[yellow]⚠️ Failed to configure USBGuard: {e}[/yellow]")
 
         # 3. Wait for Tor circuit bootstrap
         is_terminal = hasattr(sys.stdout, 'isatty') and sys.stdout.isatty()
@@ -986,9 +1040,11 @@ table inet anonshield {{
             subprocess.run(["sysctl", "-w", "net.ipv6.conf.all.disable_ipv6=0"], check=False)
             subprocess.run(["sysctl", "-w", "net.ipv6.conf.default.disable_ipv6=0"], check=False)
             subprocess.run(["systemctl", "stop", "privoxy"], capture_output=True)
+            subprocess.run(["systemctl", "stop", "usbguard"], capture_output=True)
+            subprocess.run(["usbguard", "allow-device", "-a"], capture_output=True)
         except Exception:
             pass
-        console_print("[green]✓ DNS, Hostname, and IPv6 settings restored.[/green]")
+        console_print("[green]✓ DNS, Hostname, IPv6, and USBGuard settings restored.[/green]")
         
         console_print("[bold cyan]🧱 Removing transparent proxy firewall rules and kill-switch...[/bold cyan]")
         self.cleanup_iptables_rules()
@@ -1635,6 +1691,14 @@ class AnonShieldGUI:
             progress_color=COLOR_SECURE
         )
         self.obfs4_switch.pack(anchor="w", pady=(0, 10))
+
+        self.snowflake_var = ctk.BooleanVar(value=False)
+        self.snowflake_switch = ctk.CTkSwitch(
+            opts_frame, text="Use Snowflake (Disguise as WebRTC)", 
+            variable=self.snowflake_var, command=self.on_snowflake_change,
+            progress_color=COLOR_SECURE
+        )
+        self.snowflake_switch.pack(anchor="w", pady=(0, 10))
         self.btn_custom_bridges = ctk.CTkButton(
             opts_frame, text="🌉 Custom Bridges", fg_color=COLOR_BUTTON_BG,
             font=self.font_label, hover_color=COLOR_BUTTON_HOVER,
@@ -1727,13 +1791,15 @@ class AnonShieldGUI:
 
     def set_controls_state(self, enabled=True):
         state_val = "normal" if enabled else "disabled"
-        self.btn_start.configure(state=state_val)
-        self.btn_stop.configure(state=state_val)
-        self.btn_newid.configure(state=state_val)
-        self.exit_node_menu.configure(state=state_val)
-        self.obfs4_switch.configure(state=state_val)
-        self.btn_bypass.configure(state=state_val)
-        self.btn_hidden.configure(state=state_val)
+        if hasattr(self, 'btn_start'): self.btn_start.configure(state=state_val)
+        if hasattr(self, 'btn_stop'): self.btn_stop.configure(state=state_val)
+        if hasattr(self, 'btn_newid'): self.btn_newid.configure(state=state_val)
+        if hasattr(self, 'exit_node_menu'): self.exit_node_menu.configure(state=state_val)
+        if hasattr(self, 'obfs4_switch'): self.obfs4_switch.configure(state=state_val)
+        if hasattr(self, 'snowflake_switch'): self.snowflake_switch.configure(state=state_val)
+        if hasattr(self, 'mac_rotator_switch'): self.mac_rotator_switch.configure(state=state_val)
+        if hasattr(self, 'btn_bypass'): self.btn_bypass.configure(state=state_val)
+        if hasattr(self, 'btn_hidden'): self.btn_hidden.configure(state=state_val)
         with self.action_lock:
             pass  # Lock exists; action_lock is now a threading.Lock for thread safety
         # Use a simple flag bool for UI-thread checks (Tkinter is single-threaded for UI)
@@ -1871,8 +1937,17 @@ class AnonShieldGUI:
 
     def on_obfs4_change(self):
         enable = self.obfs4_var.get()
+        if enable:
+            self.snowflake_var.set(False)
         print(f"\n[Info]: Obfs4 Bridges {'Enabled' if enable else 'Disabled'}")
         self.shield.set_obfs4(enable)
+
+    def on_snowflake_change(self):
+        enable = self.snowflake_var.get()
+        if enable:
+            self.obfs4_var.set(False)
+        print(f"\n[Info]: Snowflake Transport {'Enabled' if enable else 'Disabled'}")
+        self.shield.set_snowflake(enable)
         
     def on_mac_rotator_change(self):
         enable = self.mac_rotator_var.get()
@@ -2059,10 +2134,6 @@ class AnonShieldGUI:
         if self._action_running: return
         if not self.shield.is_anonshield_active():
             messagebox.showerror("Error", "Start Who Watches Watchers? anonymization first before requesting a new circuit.")
-
-    def on_panic(self):
-        if messagebox.askyesno("EMERGENCY PANIC", "Are you sure? This will drop memory caches, kill the connection, and shred state files. All network traffic will be blocked until reboot."):
-            threading.Thread(target=self.shield.panic_wipe, daemon=True).start()
             return
 
         self.set_controls_state(False)
@@ -2079,6 +2150,9 @@ class AnonShieldGUI:
                 
         threading.Thread(target=run, daemon=True).start()
 
+    def on_panic(self):
+        if messagebox.askyesno("EMERGENCY PANIC", "Are you sure? This will drop memory caches, kill the connection, and shred state files. All network traffic will be blocked until reboot."):
+            threading.Thread(target=self.shield.panic_wipe, daemon=True).start()
 
 def main():
     root = ctk.CTk()

@@ -1,27 +1,37 @@
 # 🛡️ Who Watches Watchers?
 
-**Who Watches Watchers?** is a premium, automated transparent proxy and anonymity system for Linux. It routes all system traffic through the Tor network, providing robust privacy, security, and an arsenal of advanced networking features wrapped in a sleek GUI and CLI.
+**Who Watches Watchers?** is a premium, automated transparent proxy and state-of-the-art anonymity system for Linux. It routes all system traffic through the Tor network and provides an arsenal of paranoia-level network defenses, physical security lock-downs, and anti-forensic tools, all wrapped in a sleek GUI and CLI.
 
-## ✨ Features
+## ✨ Extreme Anonymity Features
 
-- **Transparent Tor Proxying:** All system traffic (TCP/DNS) is automatically routed through Tor using `nftables`.
-- **System Kill Switch:** Monitors the Tor daemon and immediately blocks all network traffic if the connection drops, preventing accidental IP leaks.
-- **Auto MAC Spoofing & Rotation:** Automatically changes your hardware MAC address upon startup and can rotate it continuously at a set interval (default 15m) to thwart local tracking.
-- **Split Tunneling (Clearnet Bypass):** Run specific applications outside of the Tor network using the `anonshield-bypass` group.
-- **Isolated App Sandbox:** Launch applications in a secure, isolated network namespace.
-- **Advanced Tor Controls:**
-  - Easily request new Tor identities (circuits).
-  - Force Exit Nodes to specific geographic regions (e.g., US, DE).
-  - Enable **Obfs4 Bridges** or custom bridges to bypass deep packet inspection and Tor censorship.
-  - Ephemeral Hidden Service hosting (expose a local port as an `.onion` address).
-- **Premium GUI Dashboard:** Built with `customtkinter`, featuring real-time bandwidth graphs, active Tor circuit routing paths, and system status indicators.
-- **Automated Network Checks:** Warns you if you attempt to start the proxy without an active internet connection.
+### 📡 Network Defense
+- **Transparent Tor Proxying:** All system traffic (TCP/DNS) is automatically forced through Tor using strict `nftables` firewall rules.
+- **Protocol Scrubbing (Privoxy):** Seamlessly strips application-level HTTP/HTTPS tracking headers and cookies before traffic even hits the Tor network.
+- **DNS Leak Prevention:** Forwards standard port 53 DNS to Tor, and actively **blocks** outgoing DoT (Port 853) to prevent rogue apps from bypassing the proxy.
+- **IPv6 Disabling:** Aggressively disables IPv6 at the kernel level (`sysctl`) when the shield is active to prevent subtle routing leaks.
+- **Traffic Padding:** Continuously generates Tor dummy packets to destroy Website Traffic Fingerprinting attempts by deep-packet inspection.
+
+### 🛑 Anti-Forensics & System Lockdown
+- **Emergency Panic Mode:** A dedicated button that instantly drops all network traffic, terminates the proxy, drops system RAM caches (to defeat cold-boot memory forensics), and shreds your original MAC address state files.
+- **Physical Lockdown (`USBGuard`):** Automatically whitelists currently connected devices and **blocks all new USB devices** when the shield is active, thwarting physical BadUSB or hardware keylogger attacks.
+- **Mandatory Access Control (`AppArmor`):** Enforces a dynamically generated, strict AppArmor profile to physically prevent the anonymizer backend from accessing unauthorized files.
+- **System Kill Switch:** Monitors the Tor daemon and drops all packets instantly if the connection is lost.
+
+### 🎭 Hardware & Identity Spoofing
+- **MAC Spoofing & Rotation:** Automatically changes your hardware MAC address on startup and can seamlessly rotate it in the background every 15 minutes.
+- **Hostname Spoofing:** Temporarily rewrites your machine's hostname to `amnesic` to prevent local network leaks.
+- **Strict Isolated Sandbox (`bwrap`):** Launch sensitive apps in an isolated namespace where hardware identifiers (CPU, Motherboard) and personal files (`/home`) are completely hidden via `tmpfs` mounts.
+- **Time-Correlation Protection:** Apps launched in the sandbox are injected with `faketime`, slightly skewing their clock to defeat millisecond-level time tracking.
+
+### 🌉 Advanced Tor Controls
+- **Disguised Traffic (Snowflake & Obfs4):** Bypass severe censorship by disguising your Tor traffic as WebRTC video calls (Snowflake) or using obfuscated bridges (Obfs4).
+- **Exit Node Selection:** Force your traffic to exit from specific geographic regions (e.g., US, DE).
+- **Split Tunneling:** Run specific trusted applications outside of the Tor network (Clearnet) using the `anonshield-bypass` group.
+- **Ephemeral Hidden Services:** Easily expose a local port as an anonymous `.onion` address.
 
 ## 🚀 Installation
 
-This tool provides a fully automated setup script that works on Debian/Ubuntu (`apt`), Fedora/RHEL (`dnf`), and Arch Linux (`pacman`). 
-
-To install the application and all necessary dependencies:
+The automated setup script installs all extreme-level dependencies and applies the system hardening rules. It supports Debian/Ubuntu (`apt`), Fedora/RHEL (`dnf`), and Arch Linux (`pacman`).
 
 ```bash
 chmod +x install.sh
@@ -29,39 +39,33 @@ sudo ./install.sh
 ```
 
 During installation, the script will:
-1. Install system dependencies (`tor`, `macchanger`, `nftables`, `obfs4proxy`, etc.)
-2. Create an isolated Python virtual environment and install UI dependencies.
-3. Configure your `/etc/tor/torrc` for transparent proxying.
-4. Set up the `anonshield-bypass` group for split-tunneling.
-5. Create desktop shortcuts and a system tray icon.
+1. Install Tor, Bubblewrap, Privoxy, Snowflake, USBGuard, AppArmor, and Python dependencies.
+2. Generate strict Tor configurations (Padding enabled).
+3. Generate and enforce AppArmor profiles.
+4. Set up the split-tunneling group.
 
 ## 💻 Usage
 
-After installation, you can launch the application either via your desktop application menu (**Who Watches Watchers?**) or from the command line:
+Launch the application via your desktop menu (**Who Watches Watchers?**) or run the GUI/CLI from the terminal.
 
 ### Graphical Interface (GUI)
-Simply run `anonshield-gui` from your terminal or click the application icon. The GUI provides a full dashboard to start/stop the shield, monitor traffic, and configure advanced settings like bridges and exit nodes.
+Run `anonshield-gui` to open the premium dashboard. From here, you can enable Snowflake, trigger a Panic Wipe, rotate your identity, and monitor active Tor circuits.
 
 ### Command Line Interface (CLI)
-You can also control the system directly from the command line using the `anonshield` command:
-
 ```bash
-# Start the transparent proxy and anonymize traffic
+# Start the hardened proxy
 sudo anonshield start
 
-# Stop the proxy and restore normal networking
+# Stop the proxy and restore system defaults (Networking, USB, Hostname)
 sudo anonshield stop
 
-# Check current status, public IP, and active Tor circuit
+# Check status and public IP
 sudo anonshield status
 
-# Rotate to a new Tor identity (new circuit)
+# Rotate to a new Tor identity
 sudo anonshield new-id
 
-# Start MAC auto-rotator (rotates every 15 minutes)
-sudo anonshield start-mac-rotator
-
-# Launch an application in the sandbox
+# Launch an application in the extremely secure sandbox
 sudo anonshield sandbox <command>
 
 # Launch an application bypassing Tor (Clearnet)
@@ -70,12 +74,11 @@ sudo anonshield bypass <command>
 
 ## ⚠️ Uninstallation
 
-To completely remove the application, its configuration files, and restore your system to its original state, run the install script with the `uninstall` argument:
-
+To completely remove the application, AppArmor profiles, and custom configurations:
 ```bash
 sudo ./install.sh uninstall
 ```
 
 ## ⚖️ Disclaimer
 
-This tool is designed to enhance privacy and security by leveraging the Tor network. However, no software can guarantee 100% anonymity. Use this tool responsibly and at your own risk. The developers are not responsible for any misuse, data leaks, or legal consequences resulting from the use of this software.
+This tool employs extreme measures to protect user privacy. However, no software can guarantee absolute 100% anonymity against all threats. Understand the tools you are using, practice strong operational security (OpSec), and use this software responsibly and at your own risk. The developers are not responsible for any consequences resulting from its use.
