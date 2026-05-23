@@ -449,6 +449,12 @@ EOF
     usermod -aG anonshield-bypass "$REAL_USER"
     echo -e "  ${GREEN}✓${NC} Added user $REAL_USER to 'anonshield-bypass' group."
 
+    # 4.6 Create Mitmproxy Group for Fingerprint Shield isolation
+    if ! getent group anonshield-mitm >/dev/null; then
+        groupadd anonshield-mitm
+        echo -e "  ${GREEN}✓${NC} Created group 'anonshield-mitm' for fingerprint shield isolation."
+    fi
+
     # 5. Configure Tor Service
     echo -e "\n${BOLD}${BLUE}[3/7]${NC} Configuring Tor Transparent Proxy and Control Port..."
     TORRC="/etc/tor/torrc"
@@ -826,9 +832,15 @@ DNSStubListener=no
             bypass_gid = grp.getgrnam("anonshield-bypass").gr_gid if has_bypass else None
         except KeyError:
             bypass_gid = None
+            
+        try:
+            mitm_gid = grp.getgrnam("anonshield-mitm").gr_gid
+        except KeyError:
+            mitm_gid = None
 
         uid_match = str(tor_uid) if tor_uid is not None else f'"{tor_user}"'
         gid_match = str(bypass_gid) if bypass_gid is not None else '"anonshield-bypass"'
+        mitm_match = str(mitm_gid) if mitm_gid is not None else '"anonshield-mitm"'
             
         nft_conf = f"""
 table inet anonshield {{
@@ -848,6 +860,9 @@ table inet anonshield {{
         if has_bypass:
             nft_conf += f'        meta skgid {gid_match} return\n'
             
+        # The mitm proxy must not be redirected to 8119, but should go to Tor!
+        nft_conf += f'        meta skgid {mitm_match} meta l4proto tcp redirect to :{trans_port}\n'
+            
         nft_conf += f"""        udp dport 53 redirect to :5353
         tcp dport 53 redirect to :5353
 """
@@ -856,7 +871,9 @@ table inet anonshield {{
                 if ":" not in lan:
                     nft_conf += f"        ip daddr {lan} return\n"
         
-        nft_conf += f"""        meta l4proto tcp redirect to :{trans_port}
+        # Divert traffic to MITM proxy
+        nft_conf += f"""        tcp dport {{ 80, 443 }} redirect to :8119
+        meta l4proto tcp redirect to :{trans_port}
     }}
     chain forward_filter {{
         type filter hook forward priority filter; policy accept;
@@ -1810,20 +1827,28 @@ def request(flow: http.HTTPFlow) -> None:
     # Randomly toggle Upgrade-Insecure-Requests
     flow.request.headers["Upgrade-Insecure-Requests"] = random.choice(["1", "0"])
 
+    # Force the server to return uncompressed HTML so we can inject safely without decoding issues
+    if "Accept-Encoding" in flow.request.headers:
+        del flow.request.headers["Accept-Encoding"]
+
 def response(flow: http.HTTPFlow) -> None:
     if flow.response and flow.response.content:
         content_type = flow.response.headers.get("Content-Type", "")
         if "text/html" in content_type:
-            html = flow.response.content.decode("utf-8", "ignore")
-            # Inject right after <head> or at top if no head
-            js_tag = INJECT_JS.replace("{{js_payload}}", """{js_payload}""")
-            if "<head>" in html:
-                html = html.replace("<head>", "<head>" + js_tag, 1)
-            elif "<html>" in html:
-                html = html.replace("<html>", "<html>" + js_tag, 1)
-            else:
-                html = js_tag + html
-            flow.response.content = html.encode("utf-8")
+            try:
+                html = flow.response.text
+                if html:
+                    # Inject right after <head> or at top if no head
+                    js_tag = INJECT_JS.replace("{{js_payload}}", """{js_payload}""")
+                    if "<head>" in html:
+                        html = html.replace("<head>", "<head>" + js_tag, 1)
+                    elif "<html>" in html:
+                        html = html.replace("<html>", "<html>" + js_tag, 1)
+                    else:
+                        html = js_tag + html
+                    flow.response.text = html
+            except Exception:
+                pass
 '''
         with open(self.script_path, "w") as f:
             f.write(script_content)
@@ -1856,13 +1881,18 @@ def response(flow: http.HTTPFlow) -> None:
             "-s", self.script_path
         ]
         
-        # Run detached
-        proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        def set_mitm_gid():
+            import grp
+            try:
+                mitm_gid = grp.getgrnam("anonshield-mitm").gr_gid
+                os.setgid(mitm_gid)
+            except Exception:
+                pass
+                
+        # Run detached under the dedicated group
+        proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, preexec_fn=set_mitm_gid)
         with open(self.pid_file, "w") as f:
             f.write(str(proc.pid))
-            
-        # Add iptables/nftables rule to redirect ports 80 and 443 to 8119
-        subprocess.run(["nft", "add", "rule", "inet", "anonshield", "prerouting_redirect", "tcp", "dport", "{ 80, 443 }", "redirect", "to", ":8119"], check=False)
         
         # Copy the dynamically generated CA to system trust store so browsers accept the proxy
         time.sleep(2) # Give mitmproxy time to generate certs
