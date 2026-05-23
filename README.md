@@ -1,102 +1,94 @@
-# Who Watches Watchers? (AnonShield)
+# 🛡️ Who Watches Watchers? (Antigravity Shield)
 
-**Advanced System-Wide Anonymizer and Privacy Toolkit**
+*An advanced, system-wide Anonymity Engine and Fingerprint Shield designed for extreme privacy.*
 
-"Who Watches Watchers?" (also known as AnonShield) is a highly aggressive, system-wide network anonymization and security tool designed for Linux. It forces all of your operating system's traffic through the Tor network via a transparent proxy and hardened firewall rules, ensuring absolutely no IP leaks. 
-
-In addition to routing traffic through Tor, it provides an array of advanced privacy countermeasures, including hardware address spoofing, biometric keystroke obfuscation, browser fingerprint randomization, and an isolated MicroVM sandbox.
+**Who Watches Watchers?** is an all-in-one transparent proxy and system lockdown tool. It forces 100% of your operating system's network traffic through the Tor network, spoofs your hardware footprint, and intercepts browser tracking APIs to make your machine indistinguishable from millions of others.
 
 ---
 
 ## 🌟 Key Functionality
 
-- **System-Wide Tor Transparent Proxy:** All TCP and DNS traffic from any application is forcefully routed through the Tor network using `nftables`. Traffic that cannot be routed (e.g., UDP, ICMP) is strictly blocked to prevent leaks.
-- **Hardware MAC Address Spoofing:** Automatically rotates and spoofs your network interfaces' MAC addresses on startup, protecting your hardware identity from local network administrators.
-- **Fingerprint Shield (mitmproxy):** A local interception proxy that injects dynamic noise into your web traffic, effectively randomizing your browser fingerprint to defeat advanced tracking techniques (like Canvas, WebGL, and AudioContext fingerprinting).
-- **Alpine MicroVM Sandbox:** Launch untrusted applications or files within an isolated Alpine Linux QEMU MicroVM. The VM is confined to its own network namespace and destroys all session data upon exit.
-- **Clearnet Split-Tunneling (Bypass):** Need to access a website that blocks Tor? You can run specific applications outside the Tor tunnel using the dedicated `anonshield-bypass` group.
-- **Biometric Keystroke Anonymization:** Utilizes `kloak` to scramble the timing of your keystrokes, defeating biometric identification based on typing cadence.
-- **Decoy Traffic Generator:** Continuously generates background noise traffic to popular websites, obfuscating your actual browsing patterns from ISP traffic analysis.
-- **Aggressive Kernel Hardening:** Applies restrictive `sysctl` security configurations (disabling ptrace, restricting dmesg, and disabling TCP timestamps) to protect the host OS.
-- **Cryptographic RAM Wiping:** Hooks into the shutdown process to securely wipe system memory (using `sdmem`), mitigating cold-boot attacks.
+1. **System-Wide Transparent Proxy**
+   - Automatically intercepts **all** outbound TCP/UDP traffic and forces it through the Tor network (`TransPort` and `DNSPort`).
+   - Completely blocks IPv6 to prevent DNS and IP leaks.
+   - Includes a strict **Kill Switch**: If Tor drops or crashes, the firewall locks down the machine, air-gapping the OS until Tor reconnects.
+
+2. **Advanced Snowflake Integration**
+   - Connects to Tor via the **Snowflake** anti-censorship bridge, disguising Tor traffic as standard WebRTC video-calling traffic to bypass Deep Packet Inspection (DPI) and strict firewalls.
+
+3. **Exhaustive Fingerprint Shield (Mitmproxy)**
+   - Deploys an invisible Man-in-the-Middle (MITM) proxy to inject a massive JavaScript anti-fingerprinting payload into every unencrypted webpage.
+   - Spoofs **57+ advanced browser tracking APIs**, including Canvas, WebGL, Audio Oscillators, Battery API, Sensors (Gyroscope), Media Formats, Timezone, User Agent, and more.
+   - Bypasses advanced trackers (like AmiUnique) by returning plausible, randomized data instead of your real hardware telemetry.
+
+4. **Hardware MAC Spoofing & PCIe Resets**
+   - Automatically randomizes your network interface MAC addresses before connecting to any network.
+   - Performs a **Raw PCIe Bus Reset** on network cards to clear zombie states and ensure MAC changes persist safely across router reconnections.
+   - Supports automated periodic MAC rotation.
+
+5. **Decoy Traffic Generator**
+   - Automatically generates randomized, harmless background web traffic through Tor to throw off ISP traffic analysis and prevent Tor circuits from going into Dormant mode.
+
+6. **DNS Blackholing & Anti-Telemetry**
+   - Implements the StevenBlack hosts file to natively sinkhole telemetry, tracking, and ad domains at the system level.
 
 ---
 
-## 🛠 Installation
+## 🛠️ Installation
 
-The application comes with a fully automated installer script that handles dependencies, virtual environments, systemd services, and desktop shortcuts.
+### Prerequisites
+- Debian-based OS (Parrot OS, Kali, Ubuntu, Debian)
+- `sudo` privileges
 
-1. Open a terminal and navigate to the directory containing the installer.
-2. Run the installer script with `sudo`:
+### Setup Instructions
+1. Navigate to the directory containing the installer script.
+2. Run the automated installer:
    ```bash
    sudo ./install.sh
    ```
-3. The script will automatically detect your package manager (`apt`, `dnf`, or `pacman`) and install required system packages, download the MicroVM image, and set up the Python environment.
-4. Once completed, a desktop shortcut will be placed on your desktop and in your application menu.
+3. The script will automatically resolve dependencies, install Tor, generate local Certificates for the Fingerprint Shield, and configure the firewall.
+4. Once completed, a graphical dashboard (`anonshield`) will be available.
 
 ---
 
 ## 🚀 Usage
 
-You can manage the shield either through the sleek Graphical User Interface (GUI) or the Command Line Interface (CLI).
-
-### Using the GUI
-You can launch the GUI by searching for **"Who Watches Watchers?"** in your application menu, using the Desktop shortcut, or running the following command:
+You can launch the dashboard anywhere by opening a terminal and typing:
 ```bash
-pkexec anonshield-gui
+sudo anonshield
 ```
-The GUI allows you to:
-- Toggle the Tor transparent proxy on and off.
-- Monitor real-time Rx/Tx bandwidth and view security logs.
-- Start or stop the Fingerprint Randomizer.
-- Request a new Tor identity (IP address).
-- Launch applications directly into the MicroVM or the Clearnet Bypass.
-
-### Using the CLI
-For power users, the `anonshield` command provides full control:
-- `sudo anonshield start` — Activate the transparent proxy and MAC spoofing.
-- `sudo anonshield stop` — Deactivate the proxy and restore normal networking.
-- `sudo anonshield status` — View your current external IP and Tor circuit status.
-- `sudo anonshield newid` — Request a new Tor identity.
-- `sudo anonshield bypass <command>` — Run a command over the normal network (bypassing Tor).
+From the GUI, you can:
+- **Start Shield:** Bootstraps Tor, spoofs MACs, and applies the transparent proxy firewall.
+- **Stop Shield:** Removes the firewall, un-spoofs MACs, and restores direct internet access.
+- **Rotate Identity:** Forces Tor to build a brand new circuit, changing your external IP.
+- **Panic Button:** Immediately shreds the cache and memory, and violently kills network interfaces in case of emergency.
 
 ---
 
-## 📦 Using the MicroVM Sandbox
+## 💻 Using in a Virtual Machine (VM)
 
-The MicroVM Sandbox is a powerful feature designed to handle untrusted or potentially malicious files/applications without risking your host operating system.
+If you are running Who Watches Watchers? inside a Virtual Machine (like VirtualBox, VMware, or KVM), you must be aware of the following network configurations:
 
-When you launch an application in the sandbox, it runs inside a lightweight Alpine Linux virtual machine (QEMU). The VM has no access to your host filesystem and runs inside a locked-down network namespace.
+1. **MAC Spoofing Restrictions:**
+   - Hypervisors often strictly enforce the MAC addresses of virtual adapters. 
+   - **VirtualBox:** Go to Settings -> Network -> Advanced -> **Promiscuous Mode**, and set it to **Allow All**. If this is not set, MAC spoofing will disconnect you from the internet because the hypervisor will drop packets from the spoofed MAC.
+   - **VMware:** You may need to edit the `.vmx` file or adjust vSwitch security policies to allow MAC address changes, otherwise the virtual adapter will silently drop traffic.
 
-**To use the sandbox:**
-1. **Via GUI:** Click the **"MicroVM Sandbox"** button in the graphical interface. A prompt will ask you which application or command you wish to sandbox.
-2. **Via CLI:** Run the following command:
-   ```bash
-   sudo anonshield sandbox "firefox"
-   ```
-   *(Replace `firefox` with the command you wish to run).*
+2. **Network Adapter Types:**
+   - **NAT (Recommended):** Uses the host machine's connection securely. The VM's traffic is forced through Tor *before* leaving the VM.
+   - **Bridged:** Gives the VM its own IP on the local network. MAC spoofing is more effective here but requires Promiscuous Mode enabled.
 
-*Note: The MicroVM is amnesic. Once the sandbox window is closed, the VM is instantly destroyed and all changes made inside it are permanently lost.*
-
----
-
-## 🗑 Uninstallation
-
-If you wish to remove the application and restore your system to its default state, the installer script includes an automated cleanup sequence.
-
-1. Navigate to the directory containing `install.sh`.
-2. Run the uninstallation command:
-   ```bash
-   sudo ./install.sh --uninstall
-   ```
-
-**The uninstaller will safely:**
-- Stop all background anonymization services.
-- Flush all firewall (`nftables`) proxy rules.
-- Restore your original hardware MAC addresses from the saved state.
-- Remove injected CA certificates from your browser trust stores (Firefox, Chromium, Brave).
-- Restore your system's DNS and time synchronization settings.
-- Delete all application files, virtual environments, and desktop shortcuts.
+3. **Time Sync:**
+   - The script disables system time-sync while active to prevent timing attacks. VM hypervisors sometimes forcefully sync the guest clock with the host. Ensure "Time Synchronization" via VMware Tools / VBox Guest Additions is **disabled** while the shield is active for maximum anonymity.
 
 ---
-*Created with ❤ by Grouvya!*
+
+## 🗑️ Uninstallation
+
+If you wish to completely remove Who Watches Watchers?, restore your original DNS, revert all firewall configurations, and delete the background services, simply run:
+
+```bash
+sudo ./install.sh --uninstall
+```
+
+This will safely roll back the entire system to its default state and delete the application.

@@ -1383,8 +1383,8 @@ table inet anonshield {{
         # 3. Wait for Tor circuit bootstrap
         is_terminal = hasattr(sys.stdout, 'isatty') and sys.stdout.isatty()
         
-        # Bootstrap timeout: 90s for cold starts, bridges, and slow connections
-        BOOTSTRAP_TIMEOUT = 90
+        # Bootstrap timeout: 180s for cold starts, bridges, and slow connections
+        BOOTSTRAP_TIMEOUT = 180
         success = False
         if HAS_RICH and is_terminal:
             with Progress(
