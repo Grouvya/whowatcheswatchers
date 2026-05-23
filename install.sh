@@ -151,10 +151,12 @@ PYEOF
     fi
     # Remove CA from Firefox/Chrome NSS databases for the real user
     if command -v certutil > /dev/null 2>&1 && [ -n "$REAL_HOME" ]; then
-        for FF_PROF in "$REAL_HOME"/.mozilla/firefox/*.default* "$REAL_HOME"/.mozilla/firefox/*.default-release*; do
+        for FF_PROF in "$REAL_HOME"/.mozilla/firefox/*.default* "$REAL_HOME"/.mozilla/firefox/*.default-release* "$REAL_HOME"/snap/firefox/common/.mozilla/firefox/*.default* "$REAL_HOME"/.var/app/org.mozilla.firefox/.mozilla/firefox/*.default*; do
             [ -d "$FF_PROF" ] && certutil -D -n "AnonShield-MITM" -d "sql:$FF_PROF" > /dev/null 2>&1 || true
         done
-        [ -d "$REAL_HOME/.pki/nssdb" ] && certutil -D -n "AnonShield-MITM" -d "sql:$REAL_HOME/.pki/nssdb" > /dev/null 2>&1 || true
+        for PKI_DIR in "$REAL_HOME"/.pki/nssdb "$REAL_HOME"/snap/chromium/current/.pki/nssdb "$REAL_HOME"/snap/brave/current/.pki/nssdb "$REAL_HOME"/.var/app/com.brave.Browser/config/.pki/nssdb "$REAL_HOME"/.var/app/org.chromium.Chromium/config/.pki/nssdb; do
+            [ -d "$PKI_DIR" ] && certutil -D -n "AnonShield-MITM" -d "sql:$PKI_DIR" > /dev/null 2>&1 || true
+        done
         echo -e "    ${GREEN}✓${NC} Fingerprint Shield CA removed from browser certificate stores."
     fi
     # Remove mitmproxy config directory and injection script
@@ -1958,17 +1960,30 @@ def response(flow: http.HTTPFlow) -> None:
                 user = os.environ.get("SUDO_USER", "root")
                 home = os.path.expanduser(f"~{user}")
                 
-                # Firefox
-                ff_dir = os.path.join(home, ".mozilla/firefox")
-                if os.path.isdir(ff_dir):
-                    for d in os.listdir(ff_dir):
-                        if ".default" in d:
-                            db_path = os.path.join(ff_dir, d)
-                            subprocess.run(["certutil", "-A", "-n", "AnonShield-MITM", "-t", "TCu,Cuw,Tuw", "-i", ca_cert, "-d", f"sql:{db_path}"], check=False)
-                # Chrome/Chromium
-                pki_dir = os.path.join(home, ".pki/nssdb")
-                if os.path.isdir(pki_dir):
-                    subprocess.run(["certutil", "-A", "-n", "AnonShield-MITM", "-t", "TCu,Cuw,Tuw", "-i", ca_cert, "-d", f"sql:{pki_dir}"], check=False)
+                # Firefox (Native, Snap, Flatpak)
+                ff_dirs = [
+                    os.path.join(home, ".mozilla/firefox"),
+                    os.path.join(home, "snap/firefox/common/.mozilla/firefox"),
+                    os.path.join(home, ".var/app/org.mozilla.firefox/.mozilla/firefox")
+                ]
+                for ff_dir in ff_dirs:
+                    if os.path.isdir(ff_dir):
+                        for d in os.listdir(ff_dir):
+                            if ".default" in d:
+                                db_path = os.path.join(ff_dir, d)
+                                subprocess.run(["certutil", "-A", "-n", "AnonShield-MITM", "-t", "TCu,Cuw,Tuw", "-i", ca_cert, "-d", f"sql:{db_path}"], check=False)
+                
+                # Chrome/Chromium/Brave (Native, Snap, Flatpak)
+                pki_dirs = [
+                    os.path.join(home, ".pki/nssdb"),
+                    os.path.join(home, "snap/chromium/current/.pki/nssdb"),
+                    os.path.join(home, "snap/brave/current/.pki/nssdb"),
+                    os.path.join(home, ".var/app/com.brave.Browser/config/.pki/nssdb"),
+                    os.path.join(home, ".var/app/org.chromium.Chromium/config/.pki/nssdb")
+                ]
+                for pki_dir in pki_dirs:
+                    if os.path.isdir(pki_dir):
+                        subprocess.run(["certutil", "-A", "-n", "AnonShield-MITM", "-t", "TCu,Cuw,Tuw", "-i", ca_cert, "-d", f"sql:{pki_dir}"], check=False)
 
     def stop(self):
         if self.is_running():
@@ -2115,6 +2130,13 @@ COLOR_BUTTON_BG = "#27273A"
 COLOR_BUTTON_HOVER = "#3B3B54"
 COLOR_ONION = "#A855F7"
 COLOR_WARN = "#F59E0B"
+
+def open_url_safely(url):
+    user = os.environ.get("SUDO_USER")
+    if user:
+        subprocess.run(["sudo", "-u", user, "xdg-open", url], check=False)
+    else:
+        webbrowser.open(url)
 
 class StdoutRedirector:
     def __init__(self, text_widget):
@@ -2565,7 +2587,7 @@ class AnonShieldGUI:
             text_color="#FF33A1", font=("Helvetica", 12, "bold"), cursor="hand2"
         )
         branding_label.pack(pady=(0, 15))
-        branding_label.bind("<Button-1>", lambda e: webbrowser.open("https://guns.lol/grouvya"))
+        branding_label.bind("<Button-1>", lambda e: open_url_safely("https://guns.lol/grouvya"))
 
         # CONSOLE
         console_container = ctk.CTkFrame(self.root, fg_color=BG_MAIN, corner_radius=0)
@@ -2814,7 +2836,7 @@ class AnonShieldGUI:
 
     def on_amiunique(self):
         print("\n[Info]: Opening Browser Fingerprint Check...")
-        webbrowser.open("https://amiunique.org/fingerprint")
+        open_url_safely("https://amiunique.org/fingerprint")
 
     def on_microvm(self):
         if not self.shield.is_anonshield_active():
@@ -2991,7 +3013,7 @@ class AnonShieldGUI:
     def on_check_tor(self):
         try:
             print("\n[Info] Opening Tor Check website in default browser...")
-            webbrowser.open("https://check.torproject.org/")
+            open_url_safely("https://check.torproject.org/")
         except Exception as e:
             print(f"\n[Error] Failed to open browser: {e}")
 
