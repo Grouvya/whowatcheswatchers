@@ -2300,18 +2300,18 @@ ctk.set_default_color_theme("blue")
 sys.path.insert(0, "/opt/anonshield")
 from anonshield import AnonShield, FingerprintRandomizer, get_real_user
 
-# Styling Constants (Modern Flat Dark Theme)
-BG_MAIN = "#121214"
-BG_CARD = "#1A1A22"
-BG_CONSOLE = "#0A0A0F"
-FG_TEXT = "#E2E8F0"
-FG_MUTED = "#94A3B8"
-COLOR_SECURE = "#00FF66"
-COLOR_EXPOSED = "#FF3344"
-COLOR_CYAN = "#00E5FF"
-COLOR_BUTTON_BG = "#27273A"
-COLOR_BUTTON_HOVER = "#3B3B54"
-COLOR_ONION = "#A855F7"
+# Styling Constants (Premium Hacker/Cyberpunk Aesthetic)
+BG_MAIN = "#09090B"
+BG_CARD = "#18181B"
+BG_CONSOLE = "#000000"
+FG_TEXT = "#FAFAFA"
+FG_MUTED = "#A1A1AA"
+COLOR_SECURE = "#10B981"
+COLOR_EXPOSED = "#EF4444"
+COLOR_CYAN = "#06B6D4"
+COLOR_BUTTON_BG = "#27272A"
+COLOR_BUTTON_HOVER = "#3F3F46"
+COLOR_ONION = "#8B5CF6"
 COLOR_WARN = "#F59E0B"
 
 def open_url_safely(url):
@@ -2550,257 +2550,212 @@ class AnonShieldGUI:
         btn_accept.pack(side="right", expand=True, padx=(10, 40))
 
     def setup_fonts(self):
-        self.font_title = ("Helvetica", 18, "bold")
-        self.font_subtitle = ("Helvetica", 12, "normal")
-        self.font_status = ("Helvetica", 24, "bold")
-        self.font_label = ("Helvetica", 12, "bold")
-        self.font_value = ("Helvetica", 12, "normal")
-        self.font_console = ("Courier New", 12, "normal")
+        self.font_title = ("Inter", 22, "bold")
+        self.font_subtitle = ("Inter", 13, "normal")
+        self.font_status = ("Inter", 38, "bold")
+        self.font_label = ("Inter", 13, "bold")
+        self.font_value = ("Inter", 13, "normal")
+        self.font_console = ("Fira Code", 12, "normal")
 
     def build_ui(self):
-        header_frame = ctk.CTkFrame(self.root, fg_color=BG_MAIN, corner_radius=0)
-        header_frame.pack(fill="x", pady=15, padx=20)
+        # Master container
+        self.root.grid_rowconfigure(0, weight=1)
+        self.root.grid_columnconfigure(1, weight=1)
+
+        # 1. SIDEBAR (Left)
+        self.sidebar = ctk.CTkFrame(self.root, fg_color=BG_CARD, corner_radius=0, width=220)
+        self.sidebar.grid(row=0, column=0, sticky="nsew")
+        self.sidebar.grid_rowconfigure(5, weight=1)
+
+        title_label = ctk.CTkLabel(self.sidebar, text="🛡️ AnonShield", text_color=COLOR_SECURE, font=self.font_title)
+        title_label.grid(row=0, column=0, padx=20, pady=(20, 30))
+
+        # Sidebar Buttons
+        self.btn_tab_dash = ctk.CTkButton(self.sidebar, text="🏠 Dashboard", font=self.font_label, fg_color="transparent", text_color=FG_TEXT, hover_color=COLOR_BUTTON_HOVER, anchor="w", command=self.show_dashboard)
+        self.btn_tab_dash.grid(row=1, column=0, padx=10, pady=5, sticky="ew")
+
+        self.btn_tab_network = ctk.CTkButton(self.sidebar, text="🌍 Network", font=self.font_label, fg_color="transparent", text_color=FG_TEXT, hover_color=COLOR_BUTTON_HOVER, anchor="w", command=self.show_network)
+        self.btn_tab_network.grid(row=2, column=0, padx=10, pady=5, sticky="ew")
+
+        self.btn_tab_tools = ctk.CTkButton(self.sidebar, text="🛠️ Tools", font=self.font_label, fg_color="transparent", text_color=FG_TEXT, hover_color=COLOR_BUTTON_HOVER, anchor="w", command=self.show_tools)
+        self.btn_tab_tools.grid(row=3, column=0, padx=10, pady=5, sticky="ew")
+
+        self.btn_panic = ctk.CTkButton(self.sidebar, text="🚨 PANIC", font=self.font_label, fg_color="#FF0000", text_color="#FFFFFF", hover_color="#CC0000", command=self.on_panic)
+        self.btn_panic.grid(row=6, column=0, padx=20, pady=20, sticky="ew")
+
+        # 2. MAIN CONTENT AREA (Right)
+        self.main_content = ctk.CTkFrame(self.root, fg_color=BG_MAIN, corner_radius=0)
+        self.main_content.grid(row=0, column=1, sticky="nsew", padx=20, pady=20)
+        self.main_content.grid_rowconfigure(0, weight=1)
+        self.main_content.grid_columnconfigure(0, weight=1)
+
+        # Tab 1: Dashboard
+        self.frame_dash = ctk.CTkFrame(self.main_content, fg_color="transparent")
+        self.build_dashboard_tab()
+
+        # Tab 2: Network
+        self.frame_network = ctk.CTkFrame(self.main_content, fg_color="transparent")
+        self.build_network_tab()
+
+        # Tab 3: Tools
+        self.frame_tools = ctk.CTkFrame(self.main_content, fg_color="transparent")
+        self.build_tools_tab()
+
+        # CONSOLE (Bottom full width)
+        console_container = ctk.CTkFrame(self.root, fg_color=BG_MAIN, corner_radius=0, height=150)
+        console_container.grid(row=1, column=0, columnspan=2, sticky="ew", padx=20, pady=(0, 20))
         
-        title_label = ctk.CTkLabel(
-            header_frame, text="🛡️  WHO WATCHES WATCHERS? SECURITY CENTER", 
-            text_color=FG_TEXT, font=self.font_title
-        )
-        title_label.pack(anchor="w")
+        ctk.CTkLabel(console_container, text="⌨️ SECURITY LOG", text_color=FG_MUTED, font=self.font_label).pack(anchor="w", pady=(0, 5))
+        self.console_widget = ctk.CTkTextbox(console_container, height=150, fg_color=BG_CONSOLE, text_color="#10B981", font=self.font_console, border_width=1, border_color="#27272A", corner_radius=15)
+        self.console_widget.pack(fill="both", expand=True)
+        self.console_widget.configure(state='disabled')
+
+        # Start on dashboard
+        self.show_dashboard()
+
+    def show_dashboard(self):
+        self.frame_network.grid_forget()
+        self.frame_tools.grid_forget()
+        self.frame_dash.grid(row=0, column=0, sticky="nsew")
+        self.btn_tab_dash.configure(fg_color=COLOR_BUTTON_BG)
+        self.btn_tab_network.configure(fg_color="transparent")
+        self.btn_tab_tools.configure(fg_color="transparent")
+
+    def show_network(self):
+        self.frame_dash.grid_forget()
+        self.frame_tools.grid_forget()
+        self.frame_network.grid(row=0, column=0, sticky="nsew")
+        self.btn_tab_dash.configure(fg_color="transparent")
+        self.btn_tab_network.configure(fg_color=COLOR_BUTTON_BG)
+        self.btn_tab_tools.configure(fg_color="transparent")
+
+    def show_tools(self):
+        self.frame_dash.grid_forget()
+        self.frame_network.grid_forget()
+        self.frame_tools.grid(row=0, column=0, sticky="nsew")
+        self.btn_tab_dash.configure(fg_color="transparent")
+        self.btn_tab_network.configure(fg_color="transparent")
+        self.btn_tab_tools.configure(fg_color=COLOR_BUTTON_BG)
+
+    def build_dashboard_tab(self):
+        # Main Status Card
+        self.status_card = ctk.CTkFrame(self.frame_dash, fg_color=BG_CARD, border_width=2, border_color=COLOR_EXPOSED, corner_radius=15)
+        self.status_card.pack(fill="x", pady=10, ipadx=10, ipady=30)
         
-        subtitle_label = ctk.CTkLabel(
-            header_frame, text="System-wide transparent Tor proxying & leak prevention for Linux", 
-            text_color=FG_MUTED, font=self.font_subtitle
-        )
-        subtitle_label.pack(anchor="w", pady=(2, 0))
-
-        body_frame = ctk.CTkFrame(self.root, fg_color=BG_MAIN, corner_radius=0)
-        body_frame.pack(fill="both", expand=True, padx=20)
-
-        # RIGHT COLUMN
-        right_frame = ctk.CTkScrollableFrame(body_frame, fg_color=BG_MAIN, width=340, corner_radius=0)
-        right_frame.pack(side="right", fill="both", padx=(10, 0))
-
-        # LEFT COLUMN
-        left_frame = ctk.CTkFrame(body_frame, fg_color=BG_MAIN, corner_radius=0)
-        left_frame.pack(side="left", fill="both", expand=True, padx=(0, 10))
-
-        self.status_card = ctk.CTkFrame(left_frame, fg_color=BG_CARD, border_width=2, border_color=COLOR_EXPOSED, corner_radius=8)
-        self.status_card.pack(fill="both", expand=True, ipadx=10, ipady=15)
-        
-        self.status_text_label = ctk.CTkLabel(
-            self.status_card, text="EXPOSED", 
-            text_color=COLOR_EXPOSED, font=self.font_status
-        )
+        self.status_text_label = ctk.CTkLabel(self.status_card, text="EXPOSED", text_color=COLOR_EXPOSED, font=self.font_status)
         self.status_text_label.pack(pady=(20, 5))
         
-        self.status_desc_label = ctk.CTkLabel(
-            self.status_card, text="Your connection is routed directly to the clearnet", 
-            text_color=FG_MUTED, font=self.font_subtitle
-        )
+        self.status_desc_label = ctk.CTkLabel(self.status_card, text="Your connection is routed directly to the clearnet", text_color=FG_MUTED, font=self.font_subtitle)
         self.status_desc_label.pack(pady=(0, 20))
 
-        details_frame = ctk.CTkFrame(self.status_card, fg_color=BG_CARD)
-        details_frame.pack(fill="x", expand=True, padx=25)
-        details_frame.columnconfigure(1, weight=1)
+        # Bandwidth Graph massive
+        graph_card = ctk.CTkFrame(self.frame_dash, fg_color=BG_CARD, corner_radius=15)
+        graph_card.pack(fill="both", expand=True, pady=10, ipadx=10, ipady=10)
+        ctk.CTkLabel(graph_card, text="LIVE BANDWIDTH", text_color=FG_MUTED, font=self.font_label).pack(anchor="w", padx=10, pady=5)
+        self.graph = BandwidthGraph(graph_card)
+        self.graph.pack(fill="both", expand=True, padx=10, pady=5)
 
-        ctk.CTkLabel(details_frame, text="Public IP:", text_color=FG_MUTED, font=self.font_label).grid(row=0, column=0, sticky="w", pady=5)
+        # Action Buttons row
+        action_row = ctk.CTkFrame(self.frame_dash, fg_color="transparent")
+        action_row.pack(fill="x", pady=10)
+        self.btn_start = self.create_flat_button(action_row, "🛡️ Start Shield", COLOR_SECURE, self.on_start_shield)
+        self.btn_start.pack(side="left", fill="x", expand=True, padx=(0, 5))
+        self.btn_stop = self.create_flat_button(action_row, "🛑 Stop Shield", COLOR_EXPOSED, self.on_stop_shield)
+        self.btn_stop.pack(side="left", fill="x", expand=True, padx=(5, 0))
+
+    def build_network_tab(self):
+        details_frame = ctk.CTkFrame(self.frame_network, fg_color=BG_CARD, corner_radius=15)
+        details_frame.pack(fill="x", pady=10, ipadx=20, ipady=20)
+        
+        # Grid layout for details
+        ctk.CTkLabel(details_frame, text="Public IP:", text_color=FG_MUTED, font=self.font_label).grid(row=0, column=0, sticky="w", pady=10)
         self.val_ip = ctk.CTkLabel(details_frame, text="Retrieving...", text_color=FG_TEXT, font=self.font_value)
-        self.val_ip.grid(row=0, column=1, sticky="w", padx=10, pady=5)
+        self.val_ip.grid(row=0, column=1, sticky="w", padx=20, pady=10)
 
-        ctk.CTkLabel(details_frame, text="Tor Daemon:", text_color=FG_MUTED, font=self.font_label).grid(row=1, column=0, sticky="w", pady=5)
-        
+        ctk.CTkLabel(details_frame, text="Tor Daemon:", text_color=FG_MUTED, font=self.font_label).grid(row=1, column=0, sticky="w", pady=10)
         tor_frame = ctk.CTkFrame(details_frame, fg_color="transparent")
-        tor_frame.grid(row=1, column=1, sticky="w", padx=10, pady=5)
-        
+        tor_frame.grid(row=1, column=1, sticky="w", padx=20, pady=10)
         self.val_tor = ctk.CTkLabel(tor_frame, text="Checking...", text_color=FG_TEXT, font=self.font_value)
         self.val_tor.pack(side="left")
-        
-        self.tor_progress = ctk.CTkProgressBar(tor_frame, width=100, height=8, progress_color=COLOR_SECURE)
+        self.tor_progress = ctk.CTkProgressBar(tor_frame, width=150, height=8, progress_color=COLOR_SECURE)
         self.tor_progress.pack(side="left", padx=(10, 0))
         self.tor_progress.set(0)
         self._target_progress = 0.0
         self.animate_progress()
 
-        ctk.CTkLabel(details_frame, text="Kill Switch:", text_color=FG_MUTED, font=self.font_label).grid(row=2, column=0, sticky="w", pady=5)
-        self.val_ks = ctk.CTkLabel(details_frame, text="Inactive", text_color=FG_TEXT, font=self.font_value)
-        self.val_ks.grid(row=2, column=1, sticky="w", padx=10, pady=5)
-
-        ctk.CTkLabel(details_frame, text="MAC Spoofing:", text_color=FG_MUTED, font=self.font_label).grid(row=3, column=0, sticky="w", pady=5)
-        self.val_mac = ctk.CTkLabel(details_frame, text="Checking...", text_color=FG_TEXT, font=self.font_value)
-        self.val_mac.grid(row=3, column=1, sticky="w", padx=10, pady=5)
-
-        ctk.CTkLabel(details_frame, text="Live Bandwidth:", text_color=FG_MUTED, font=self.font_label).grid(row=4, column=0, sticky="nw", pady=5)
-        self.graph = BandwidthGraph(details_frame)
-        self.graph.grid(row=4, column=1, sticky="we", padx=10, pady=5)
-
-        ctk.CTkLabel(details_frame, text="Tor Circuit:", text_color=FG_MUTED, font=self.font_label).grid(row=5, column=0, sticky="nw", pady=5)
+        ctk.CTkLabel(details_frame, text="Tor Circuit:", text_color=FG_MUTED, font=self.font_label).grid(row=2, column=0, sticky="nw", pady=10)
         self.val_circuit = ctk.CTkLabel(details_frame, text="Waiting for route...", text_color=COLOR_ONION, font=self.font_value, justify="left", wraplength=400)
-        self.val_circuit.grid(row=5, column=1, sticky="w", padx=10, pady=5)
+        self.val_circuit.grid(row=2, column=1, sticky="w", padx=20, pady=10)
 
-        # Legal Disclaimer
-        disclaimer_text = (
-            "⚠️ Legal Disclaimer: Who Watches Watchers? is developed solely for educational and privacy-enhancing purposes. "
-            "The author (Grouvya) assumes absolutely no responsibility or liability for how this tool is utilized. "
-            "Any misuse of this application for malicious, unauthorized, or illegal activities is strictly "
-            "prohibited and is done entirely at the user's own risk. Stay safe and respect the law."
-        )
-        disclaimer_label = ctk.CTkLabel(
-            left_frame, text=disclaimer_text, text_color=FG_MUTED, font=("Helvetica", 11, "italic"),
-            wraplength=450, justify="center"
-        )
-        disclaimer_label.pack(side="bottom", pady=(20, 0))
-
-
-
-
-        actions_card = ctk.CTkFrame(right_frame, fg_color=BG_CARD, corner_radius=8)
-        actions_card.pack(fill="x", padx=5, pady=5, ipadx=15, ipady=15)
-
-        ctk.CTkLabel(actions_card, text="CONTROL PANEL", text_color=FG_TEXT, font=self.font_label).pack(anchor="w")
+        ctk.CTkLabel(details_frame, text="MAC Spoofing:", text_color=FG_MUTED, font=self.font_label).grid(row=3, column=0, sticky="w", pady=10)
+        self.val_mac = ctk.CTkLabel(details_frame, text="Checking...", text_color=FG_TEXT, font=self.font_value)
+        self.val_mac.grid(row=3, column=1, sticky="w", padx=20, pady=10)
         
-        # ADVANCED OPTIONS
-        opts_frame = ctk.CTkFrame(actions_card, fg_color=BG_CARD)
-        opts_frame.pack(fill="x", pady=(15, 15))
+        ctk.CTkLabel(details_frame, text="Kill Switch:", text_color=FG_MUTED, font=self.font_label).grid(row=4, column=0, sticky="w", pady=10)
+        self.val_ks = ctk.CTkLabel(details_frame, text="Inactive", text_color=FG_TEXT, font=self.font_value)
+        self.val_ks.grid(row=4, column=1, sticky="w", padx=20, pady=10)
+
+        routing_frame = ctk.CTkFrame(self.frame_network, fg_color=BG_CARD, corner_radius=15)
+        routing_frame.pack(fill="x", pady=10, ipadx=20, ipady=20)
         
-        ctk.CTkLabel(opts_frame, text="Exit Node Region:", text_color=FG_MUTED, font=self.font_value).pack(anchor="w")
+        ctk.CTkLabel(routing_frame, text="Exit Node Region:", text_color=FG_MUTED, font=self.font_value).pack(anchor="w", pady=(0, 5))
         self.exit_node_var = ctk.StringVar(value="Random")
-        self.exit_node_menu = ctk.CTkOptionMenu(
-            opts_frame, values=["Random", "US", "DE", "CH", "IS", "NL", "SE"],
-            variable=self.exit_node_var, command=self.on_exit_node_change,
-            fg_color=COLOR_BUTTON_BG, button_color=COLOR_BUTTON_HOVER
-        )
-        self.exit_node_menu.pack(fill="x", pady=(5, 15))
+        self.exit_node_menu = ctk.CTkOptionMenu(routing_frame, values=["Random", "US", "DE", "CH", "IS", "NL", "SE"], variable=self.exit_node_var, command=self.on_exit_node_change, fg_color=COLOR_BUTTON_BG, button_color=COLOR_BUTTON_HOVER)
+        self.exit_node_menu.pack(fill="x", pady=(0, 20))
 
         self.obfs4_var = ctk.BooleanVar(value=False)
-        self.obfs4_switch = ctk.CTkSwitch(
-            opts_frame, text="Use Obfs4 Bridges (Anti-Censorship)", 
-            variable=self.obfs4_var, command=self.on_obfs4_change,
-            progress_color=COLOR_SECURE
-        )
-        self.obfs4_switch.pack(anchor="w", pady=(0, 10))
+        self.obfs4_switch = ctk.CTkSwitch(routing_frame, text="Use Obfs4 Bridges (Anti-Censorship)", variable=self.obfs4_var, command=self.on_obfs4_change, progress_color=COLOR_SECURE)
+        self.obfs4_switch.pack(anchor="w", pady=10)
 
         self.snowflake_var = ctk.BooleanVar(value=False)
-        self.snowflake_switch = ctk.CTkSwitch(
-            opts_frame, text="Use Snowflake (Disguise as WebRTC)", 
-            variable=self.snowflake_var, command=self.on_snowflake_change,
-            progress_color=COLOR_SECURE
-        )
-        self.snowflake_switch.pack(anchor="w", pady=(0, 10))
-        self.btn_custom_bridges = ctk.CTkButton(
-            opts_frame, text="🌉 Custom Bridges", fg_color=COLOR_BUTTON_BG,
-            font=self.font_label, hover_color=COLOR_BUTTON_HOVER,
-            command=self.on_custom_bridges, cursor="hand2", border_width=1,
-            border_color="#2D2D44", text_color=FG_TEXT, corner_radius=12, height=30
-        )
-        self.btn_custom_bridges.pack(fill="x", pady=(0, 10))
-
+        self.snowflake_switch = ctk.CTkSwitch(routing_frame, text="Use Snowflake (Disguise as WebRTC)", variable=self.snowflake_var, command=self.on_snowflake_change, progress_color=COLOR_SECURE)
+        self.snowflake_switch.pack(anchor="w", pady=10)
+        
         self.mac_rotator_var = ctk.BooleanVar(value=False)
-        self.mac_rotator_switch = ctk.CTkSwitch(
-            opts_frame, text="Auto-Rotate MAC Address (15m)", 
-            variable=self.mac_rotator_var, command=self.on_mac_rotator_change,
-            progress_color=COLOR_CYAN
-        )
-        self.mac_rotator_switch.pack(anchor="w", pady=(0, 10))
+        self.mac_rotator_switch = ctk.CTkSwitch(routing_frame, text="Auto-Rotate MAC Address (15m)", variable=self.mac_rotator_var, command=self.on_mac_rotator_change, progress_color=COLOR_CYAN)
+        self.mac_rotator_switch.pack(anchor="w", pady=10)
 
         self.fp_var = ctk.BooleanVar(value=False)
-        self.fp_switch = ctk.CTkSwitch(
-            opts_frame, text="🎭 Fingerprint Shield (Anti-Tracking)",
-            variable=self.fp_var, command=self.on_fp_shield_change,
-            progress_color=COLOR_ONION
-        )
-        self.fp_switch.pack(anchor="w", pady=(0, 10))
+        self.fp_switch = ctk.CTkSwitch(routing_frame, text="🎭 Fingerprint Shield", variable=self.fp_var, command=self.on_fp_shield_change, progress_color=COLOR_ONION)
+        self.fp_switch.pack(anchor="w", pady=10)
+        
+        self.btn_newid = self.create_flat_button(self.frame_network, "🔄 Request New Identity", COLOR_CYAN, self.on_new_identity)
+        self.btn_newid.pack(fill="x", pady=10)
 
-        # Action Buttons
-        self.btn_start = self.create_flat_button(
-            actions_card, "🛡️ Start Anonymizer", COLOR_SECURE, self.on_start_shield
-        )
-        self.btn_start.pack(fill="x", pady=5)
+    def build_tools_tab(self):
+        tools_frame = ctk.CTkFrame(self.frame_tools, fg_color=BG_CARD, corner_radius=15)
+        tools_frame.pack(fill="x", pady=10, ipadx=20, ipady=20)
+        
+        self.btn_bypass = self.create_flat_button(tools_frame, "🔓 Split Tunnel (Bypass Tor)", COLOR_WARN, self.on_bypass_app)
+        self.btn_bypass.pack(fill="x", pady=10)
 
-        self.btn_newid = self.create_flat_button(
-            actions_card, "🔄 Request New Identity", COLOR_CYAN, self.on_new_identity
-        )
-        self.btn_newid.pack(fill="x", pady=5)
+        self.btn_hidden = self.create_flat_button(tools_frame, "🧅 Host Hidden Service (.onion)", COLOR_ONION, self.on_hidden_service)
+        self.btn_hidden.pack(fill="x", pady=10)
 
-        self.btn_stop = self.create_flat_button(
-            actions_card, "🛑 Stop Anonymizer", COLOR_EXPOSED, self.on_stop_shield
-        )
-        self.btn_stop.pack(fill="x", pady=5)
+        self.btn_microvm = self.create_flat_button(tools_frame, "📦 Launch microVM Sandbox", "#06b6d4", self.on_microvm)
+        self.btn_microvm.pack(fill="x", pady=10)
 
-        self.btn_force_kill = self.create_flat_button(
-            actions_card, "⚡ Force Kill & Restore Network", "#F59E0B", self.on_force_kill
-        )
-        self.btn_force_kill.pack(fill="x", pady=5)
+        self.btn_amiunique = self.create_flat_button(tools_frame, "🔍 Check Browser Fingerprint", "#8B5CF6", self.on_amiunique)
+        self.btn_amiunique.pack(fill="x", pady=10)
+        
+        self.btn_custom_bridges = self.create_flat_button(tools_frame, "🌉 Custom Bridges", COLOR_BUTTON_BG, self.on_custom_bridges)
+        self.btn_custom_bridges.pack(fill="x", pady=10)
+        
+        self.btn_check_tor = self.create_flat_button(tools_frame, "🌐 Check Tor Connection", "#3B82F6", self.on_check_tor)
+        self.btn_check_tor.pack(fill="x", pady=10)
 
-        self.btn_reset = self.create_flat_button(
-            actions_card, "🔄 Factory Reset App", "#EF4444", self.on_reset_app
-        )
-        self.btn_reset.pack(fill="x", pady=5)
+        self.btn_force_kill = self.create_flat_button(tools_frame, "⚡ Force Kill & Restore", "#F59E0B", self.on_force_kill)
+        self.btn_force_kill.pack(fill="x", pady=10)
 
-        self.btn_panic = self.create_flat_button(
-            actions_card, "🚨 EMERGENCY PANIC WIPE", "#FF0000", self.on_panic
-        )
-        self.btn_panic.pack(fill="x", pady=(15, 5))
-
-        self.btn_check_tor = self.create_flat_button(
-            actions_card, "🌐 Check Tor Connection", "#3B82F6", self.on_check_tor
-        )
-        self.btn_check_tor.pack(fill="x", pady=5)
-
-        # Advanced Privacy Tools
-        tools_frame = ctk.CTkFrame(actions_card, fg_color=BG_CARD)
-        tools_frame.pack(fill="x", pady=(15, 0))
-        ctk.CTkLabel(tools_frame, text="ADVANCED TOOLS", text_color=FG_MUTED, font=self.font_label).pack(anchor="w", pady=(0, 5))
-
-        self.btn_bypass = self.create_flat_button(
-            tools_frame, "🔓 Split Tunnel (Bypass Tor)", COLOR_WARN, self.on_bypass_app
-        )
-        self.btn_bypass.pack(fill="x", pady=3)
-
-        self.btn_hidden = self.create_flat_button(
-            tools_frame, "🧅 Host Hidden Service (.onion)", COLOR_ONION, self.on_hidden_service
-        )
-        self.btn_hidden.pack(fill="x", pady=3)
-
-        self.btn_microvm = self.create_flat_button(
-            tools_frame, "📦 Launch microVM Sandbox", "#06b6d4", self.on_microvm
-        )
-        self.btn_microvm.pack(fill="x", pady=3)
-
-        self.btn_amiunique = self.create_flat_button(
-            tools_frame, "🔍 Check Browser Fingerprint", "#8B5CF6", self.on_amiunique
-        )
-        self.btn_amiunique.pack(fill="x", pady=3)
-
-        # Branding
-        branding_label = ctk.CTkLabel(
-            right_frame, text="Created with ❤  by Grouvya!", 
-            text_color="#FF33A1", font=("Helvetica", 12, "bold"), cursor="hand2"
-        )
-        branding_label.pack(pady=(0, 15))
-        branding_label.bind("<Button-1>", lambda e: open_url_safely("https://guns.lol/grouvya"))
-
-        # CONSOLE
-        console_container = ctk.CTkFrame(self.root, fg_color=BG_MAIN, corner_radius=0)
-        console_container.pack(fill="both", side="bottom", pady=15, padx=20)
-
-        ctk.CTkLabel(
-            console_container, text="⌨️ REAL-TIME SECURITY LOG", 
-            text_color=FG_MUTED, font=self.font_label
-        ).pack(anchor="w", pady=(0, 5))
-
-        self.console_widget = ctk.CTkTextbox(
-            console_container, height=150, fg_color=BG_CONSOLE, text_color="#A7F3D0",
-            font=self.font_console, border_width=1, border_color="#1F2937",
-        )
-        self.console_widget.pack(fill="both", expand=True)
-        self.console_widget.configure(state='disabled')
+        self.btn_reset = self.create_flat_button(tools_frame, "🔄 Factory Reset", "#EF4444", self.on_reset_app)
+        self.btn_reset.pack(fill="x", pady=10)
 
     def create_flat_button(self, parent, text, active_color, command):
         btn = ctk.CTkButton(
             parent, text=text, fg_color=COLOR_BUTTON_BG,
             font=self.font_label, hover_color=COLOR_BUTTON_HOVER,
             command=command, cursor="hand2", border_width=1,
-            border_color="#2D2D44", text_color=FG_TEXT, corner_radius=12, height=40
+            border_color="#3F3F46", text_color=FG_TEXT, corner_radius=15, height=45
         )
         return btn
 
