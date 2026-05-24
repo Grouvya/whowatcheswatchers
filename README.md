@@ -59,6 +59,14 @@ This is the crown jewel of the anonymity engine. The shield deploys an invisible
 ### 11. Ephemeral Hidden Services (.onion)
 - **Instant .onion Hosting:** Directly from the GUI, you can select any local port (e.g., a python web server running on port 8080) and instantly expose it to the deep web. The script communicates with the Tor Control port to generate a temporary `ADD_ONION` address, allowing you to securely host files or chats anonymously without port forwarding.
 
+### 12. Local HTTP Proxy (Privoxy)
+- In addition to the transparent proxy, the application automatically deploys `privoxy` on port `127.0.0.1:8118`. This provides an HTTP/HTTPS proxy fallback explicitly chained into Tor for legacy applications or scripts that do not respect transparent routing.
+
+### 13. Application Sandboxing (Bubblewrap)
+- Using the underlying `bwrap` infrastructure, you can launch untrusted applications in a fully isolated container.
+- **Data Isolation:** Mounts `/sys`, `/proc`, and `/home` as empty volatile RAM disks (`tmpfs`). The sandboxed application has absolutely zero read-access to your hardware serials, operating system metrics, or personal user files.
+- **Time-Offset Spoofing:** Integrated with `faketime` to synthetically offset the application's clock by `-0.3` seconds. This completely neutralizes sophisticated CPU/Cache timing attacks used by advanced browser fingerprinters.
+
 ---
 
 ## 🛠️ Installation & Setup
