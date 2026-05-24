@@ -8,6 +8,30 @@
 
 ---
 
+## 🏗️ System Architecture
+
+```mermaid
+graph TD
+    A[Untrusted Application] -->|TCP/UDP Outbound| B(nftables Transparent Proxy)
+    C[Bubblewrap Sandboxed App] -->|HTTP_PROXY| D(Privoxy localhost:8118)
+    
+    B -->|Ports 80/443| E{Fingerprint Shield MITM}
+    B -->|Other Ports / DNS| F(Tor TransPort/DNSPort)
+    D --> F
+    
+    E -->|Inject JS Spoofing Payload| F
+    
+    F -->|Snowflake WebRTC| G((Tor Network))
+    
+    subgraph "Kernel & Hardware Lockdown"
+        H[MAC Auto-Rotator] -.->|15m PCIe Reset| NetworkCard
+        I[Kloak] -.->|Keystroke Scrambling| Kernel
+        J[USBGuard] -.->|Block Rogue Devices| Kernel
+    end
+```
+
+---
+
 ## 🌟 Core Architecture & Functionality
 
 ### 1. System-Wide Transparent Proxy (nftables)
@@ -71,6 +95,12 @@ This is the crown jewel of the anonymity engine. The shield deploys an invisible
 - **System Tray Applet:** The dashboard natively integrates into your desktop environment's system tray (via `pystray`), allowing you to minimize the GUI and run the engine silently in the background.
 - **Root Desktop Notifications:** The backend hooks into your active user's `DBUS_SESSION_BUS_ADDRESS` to send native desktop notifications (via `notify-send`) even though the engine runs as root, keeping you alerted if the Kill Switch triggers.
 - **MAC Auto-Rotator:** An optional background thread that automatically shreds and re-randomizes your physical MAC addresses every 15 minutes, performing seamless PCIe bus resets without dropping the active Tor circuits.
+
+### 15. The Panic Wipe (Emergency Air-Gap)
+- Triggering the `Panic` button in the GUI executes a violent and irreversible system lockdown.
+- It flushes the entire `nftables` ruleset and replaces it with a universal `drop` policy, instantly air-gapping the machine.
+- It completely shreds (`shred -u`) any stored MAC address state files to prevent recovery.
+- It drops all active kernel memory caches (`echo 3 > /proc/sys/vm/drop_caches`) to flush residual network states from RAM, requiring a hard reboot to restore networking capabilities.
 
 ---
 
