@@ -67,6 +67,11 @@ This is the crown jewel of the anonymity engine. The shield deploys an invisible
 - **Data Isolation:** Mounts `/sys`, `/proc`, and `/home` as empty volatile RAM disks (`tmpfs`). The sandboxed application has absolutely zero read-access to your hardware serials, operating system metrics, or personal user files.
 - **Time-Offset Spoofing:** Integrated with `faketime` to synthetically offset the application's clock by `-0.3` seconds. This completely neutralizes sophisticated CPU/Cache timing attacks used by advanced browser fingerprinters.
 
+### 14. Desktop Integration & Automation
+- **System Tray Applet:** The dashboard natively integrates into your desktop environment's system tray (via `pystray`), allowing you to minimize the GUI and run the engine silently in the background.
+- **Root Desktop Notifications:** The backend hooks into your active user's `DBUS_SESSION_BUS_ADDRESS` to send native desktop notifications (via `notify-send`) even though the engine runs as root, keeping you alerted if the Kill Switch triggers.
+- **MAC Auto-Rotator:** An optional background thread that automatically shreds and re-randomizes your physical MAC addresses every 15 minutes, performing seamless PCIe bus resets without dropping the active Tor circuits.
+
 ---
 
 ## 🛠️ Installation & Setup
